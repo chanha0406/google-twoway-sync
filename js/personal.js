@@ -1,9 +1,7 @@
-function t(text) {
-	if (typeof window.t === 'function') {
-		return window.t('googletwowaysync', text)
-	}
-	if (window.OC && window.OC.L10N && typeof window.OC.L10N.translate === 'function') {
-		return window.OC.L10N.translate('googletwowaysync', text)
+function translate(text) {
+	const l10n = window.OC && window.OC.L10N
+	if (l10n && typeof l10n.translate === 'function') {
+		return l10n.translate('googletwowaysync', text)
 	}
 	return text
 }
@@ -53,26 +51,26 @@ function init() {
 	}
 
 	function formatTime(stamp) {
-		return stamp ? t('Last sync') + ' ' + new Date(stamp * 1000).toLocaleString() : t('Not synced yet')
+		return stamp ? translate('Last sync') + ' ' + new Date(stamp * 1000).toLocaleString() : translate('Not synced yet')
 	}
 
 	function render(next) {
 		redirect.textContent = next.redirectUri || ''
 		if (next.connected && next.tasksScope) {
-			account.textContent = t('Connected. Write access to calendar, contacts, and tasks is granted.')
+			account.textContent = translate('Connected. Write access to calendar, contacts, and tasks is granted.')
 		} else if (next.connected) {
-			account.textContent = t('Connected. To sync tasks, press Connect Google again and allow task access.')
+			account.textContent = translate('Connected. To sync tasks, press Connect Google again and allow task access.')
 		} else if (next.legacyToken) {
-			account.textContent = t('Not connected yet. Google Synchronization\'s read access can only list items and preview.')
+			account.textContent = translate('Not connected yet. Google Synchronization\'s read access can only list items and preview.')
 		} else {
-			account.textContent = t('Not connected yet.')
+			account.textContent = translate('Not connected yet.')
 		}
 		const collections = next.collections || []
-		fillList(calendarList, collections.filter((col) => col.kind === 'calendar'), t('No calendars. Press Reload list.'), true)
-		fillList(contactList, collections.filter((col) => col.kind === 'contacts'), t('No contacts. Press Reload list.'), false)
+		fillList(calendarList, collections.filter((col) => col.kind === 'calendar'), translate('No calendars. Press Reload list.'), true)
+		fillList(contactList, collections.filter((col) => col.kind === 'contacts'), translate('No contacts. Press Reload list.'), false)
 		const taskEmpty = next.connected && !next.tasksScope
-			? t('Task access is missing. Press Connect Google again and allow it.')
-			: t('No task lists. Press Reload list.')
+			? translate('Task access is missing. Press Connect Google again and allow it.')
+			: translate('No task lists. Press Reload list.')
 		fillList(taskList, collections.filter((col) => col.kind === 'tasks'), taskEmpty, false)
 	}
 
@@ -110,11 +108,11 @@ function init() {
 			}
 			const name = document.createElement('span')
 			name.className = 'name'
-			name.textContent = col.name || (showMode ? t('Calendar') : t('Contact'))
+			name.textContent = col.name || (showMode ? translate('Calendar') : translate('Contact'))
 			main.appendChild(name)
 			const badge = document.createElement('span')
 			badge.className = 'badge' + (col.writable ? ' write' : '')
-			badge.textContent = col.writable ? t('Two-way') : t('Read only')
+			badge.textContent = col.writable ? translate('Two-way') : translate('Read only')
 			main.appendChild(badge)
 			label.appendChild(main)
 			item.appendChild(label)
@@ -124,7 +122,7 @@ function init() {
 				bits.push(col.lastSummary)
 			}
 			if (col.legacyJob) {
-				bits.push(t('Google Synchronization is enabled, so this is preview only'))
+				bits.push(translate('Google Synchronization is enabled, so this is preview only'))
 			}
 			const meta = document.createElement('p')
 			meta.className = 'meta'
@@ -150,7 +148,7 @@ function init() {
 		if (payload.preview) {
 			const banner = document.createElement('p')
 			banner.className = 'banner'
-			banner.textContent = t('This is a preview. Nothing was written.')
+			banner.textContent = translate('This is a preview. Nothing was written.')
 			result.appendChild(banner)
 		}
 		function append(title, reports) {
@@ -166,13 +164,13 @@ function init() {
 				const summary = document.createElement('p')
 				summary.textContent = report.name + ': ' + report.summary
 				block.appendChild(summary)
-				const lines = report.errors.map((error) => t('Error') + ': ' + error).concat(report.lines)
+				const lines = report.errors.map((error) => translate('Error') + ': ' + error).concat(report.lines)
 				if (lines.length > 0) {
 					const list = document.createElement('ul')
 					lines.forEach((line) => {
 						const item = document.createElement('li')
 						item.textContent = line
-						if (line.startsWith(t('Error') + ':')) {
+						if (line.startsWith(translate('Error') + ':')) {
 							item.className = 'error'
 						}
 						list.appendChild(item)
@@ -182,10 +180,10 @@ function init() {
 				result.appendChild(block)
 			})
 		}
-		append(t('Calendar'), payload.reports.filter((report) => report.kind === 'calendar'))
-		append(t('Contact'), payload.reports.filter((report) => report.kind === 'contacts'))
-		append(t('Tasks'), payload.reports.filter((report) => report.kind === 'tasks'))
-		append(t('Other'), payload.reports.filter((report) => report.kind !== 'calendar' && report.kind !== 'contacts' && report.kind !== 'tasks'))
+		append(translate('Calendar'), payload.reports.filter((report) => report.kind === 'calendar'))
+		append(translate('Contact'), payload.reports.filter((report) => report.kind === 'contacts'))
+		append(translate('Tasks'), payload.reports.filter((report) => report.kind === 'tasks'))
+		append(translate('Other'), payload.reports.filter((report) => report.kind !== 'calendar' && report.kind !== 'contacts' && report.kind !== 'tasks'))
 	}
 
 	async function call(path, method, body) {
@@ -204,7 +202,7 @@ function init() {
 			})
 			const payload = await response.json()
 			if (!response.ok) {
-				throw new Error(payload.error || t('Request failed.'))
+				throw new Error(payload.error || translate('Request failed.'))
 			}
 			if (payload.collections) {
 				render(payload)
@@ -217,7 +215,7 @@ function init() {
 			}
 			return payload
 		} catch (error) {
-			setStatus(error.message || t('Request failed.'), true)
+			setStatus(error.message || translate('Request failed.'), true)
 			return null
 		} finally {
 			setBusy(false)
@@ -247,20 +245,20 @@ function init() {
 	})
 	document.getElementById('gtsync-preview').addEventListener('click', async () => {
 		result.hidden = false
-		result.textContent = t('Previewing…')
+		result.textContent = translate('Previewing…')
 		showResult(await call('sync', 'POST', { preview: true }))
 	})
 	document.getElementById('gtsync-sync').addEventListener('click', async () => {
 		result.hidden = false
-		result.textContent = t('Syncing…')
+		result.textContent = translate('Syncing…')
 		showResult(await call('sync', 'POST', { preview: false }))
 	})
 
 	const params = new URLSearchParams(window.location.search)
 	if (params.get('gtsyncError')) {
-		setStatus(t('Google connection failed: ') + params.get('gtsyncError'), true)
+		setStatus(translate('Google connection failed: ') + params.get('gtsyncError'), true)
 	} else if (params.get('gtsyncConnected')) {
-		setStatus(t('Connected the Google account.'), false)
+		setStatus(translate('Connected the Google account.'), false)
 	}
 	render(state)
 }
