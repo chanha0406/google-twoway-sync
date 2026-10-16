@@ -1,0 +1,54 @@
+#gtsync-admin {
+	max-width: 46rem;
+}
+
+#gtsync-admin .lead,
+#gtsync-admin .note {
+	display: block;
+	margin: 0 0 0.75rem;
+	color: var(--color-text-maxcontrast);
+	line-height: 1.45;
+	overflow-wrap: anywhere;
+}
+
+#gtsync-admin code {
+	display: block;
+	margin: 0 0 0.75rem;
+	padding: 0.45rem 0.6rem;
+	overflow-wrap: anywhere;
+	word-break: break-all;
+	user-select: all;
+	background: var(--color-background-dark);
+	border-radius: var(--border-radius);
+}
+
+#gtsync-admin .field {
+	display: block;
+	margin: 0.8rem 0 0.3rem;
+}
+
+#gtsync-admin input {
+	display: block;
+	width: 100%;
+	max-width: 36rem;
+	box-sizing: border-box;
+}
+
+#gtsync-admin .actions {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 0.5rem;
+	margin: 0.75rem 0 0.25rem;
+}
+
+#gtsync-admin .actions button {
+	margin: 0;
+}
+
+#gtsync-admin .error {
+	color: var(--color-error);
+}
+
+#gtsync-admin .ok {
+	color: var(--color-success);
+}

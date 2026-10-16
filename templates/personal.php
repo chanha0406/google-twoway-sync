@@ -12,7 +12,7 @@ $state = json_encode($_['state'], JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | 
 		<?php p($l->t('Calendars that Google does not allow writing to, such as holidays, are imported only. Edits in Nextcloud are reverted on the next sync. Contacts that were already in the address book when sync is first turned on are not uploaded, and only contacts created afterwards are sent to Google. Turning on a task list creates a separate calendar for that list. It stays separate from event calendars and shows up in the Tasks app. Google tasks have no time of day, so only the date is synced.')); ?>
 	</p>
 	<p class="lead">
-		<?php p($l->t('This app keeps working when Google Synchronization is turned off. It still uses that app\'s OAuth client settings, and cron does not run the disabled app\'s import jobs. Writing starts after you connect the Google account again on this page. Turning the old app back on resumes its import, so leave it off after the switch.')); ?>
+		<?php p($l->t('This app keeps working when Google Synchronization is turned off. The OAuth client is set in this app\'s admin settings. If those fields are empty, the Google Synchronization client is used instead. Cron does not run the disabled app\'s import jobs. Writing starts after you connect the Google account again on this page. Turning the old app back on resumes its import, so leave it off after the switch.')); ?>
 	</p>
 
 	<section class="block">

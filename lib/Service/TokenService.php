@@ -18,10 +18,10 @@ use OCP\Security\ISecureRandom;
 /**
  * OAuth tokens with write access to Calendar and People.
  *
- * The OAuth client is the one configured for Google Synchronization unless
- * this app has its own client_id / client_secret in its app config. Google
- * Synchronization only holds read-only tokens, which are used for previews
- * when this app is not connected yet.
+ * The OAuth client is this app's own client_id / client_secret. If either
+ * value is empty, the Google Synchronization client is used. That fallback
+ * is not read from Social Login. Google Synchronization only holds read-only
+ * tokens, which are used for previews when this app is not connected yet.
  */
 class TokenService {
 	private const AUTH_URL = 'https://accounts.google.com/o/oauth2/v2/auth';
@@ -41,19 +41,80 @@ class TokenService {
 	}
 
 	/**
+	 * @return array{clientId: string, secretSet: bool, usingOwn: bool, fallback: bool, fallbackSharedWithSocialLogin: bool, redirectUri: string}
+	 */
+	public function adminCredentialState(): array {
+		$ownId = $this->ownClientId();
+		$ownSecret = $this->ownClientSecret();
+		$usingOwn = $ownId !== '' && $ownSecret !== '';
+		$legacyId = $this->appConfig->getValueString(Application::LEGACY_APP_ID, 'client_id', '', lazy: true);
+		$legacySecret = $this->appConfig->getValueString(Application::LEGACY_APP_ID, 'client_secret', '', lazy: true);
+		$fallback = !$usingOwn && $legacyId !== '' && $legacySecret !== '';
+		return [
+			'clientId' => $ownId,
+			'secretSet' => $ownSecret !== '',
+			'usingOwn' => $usingOwn,
+			'fallback' => $fallback,
+			'fallbackSharedWithSocialLogin' => $fallback && $this->sameAsSocialLogin($legacyId),
+			'redirectUri' => $this->getRedirectUri(),
+		];
+	}
+
+	public function saveAdminCredentials(string $clientId, string $clientSecret): void {
+		$clientId = trim($clientId);
+		$clientSecret = trim($clientSecret);
+		if ($clientId === '') {
+			$this->appConfig->deleteKey(Application::APP_ID, 'client_id');
+			$this->appConfig->deleteKey(Application::APP_ID, 'client_secret');
+			return;
+		}
+		if ($clientSecret === '' && $this->ownClientSecret() === '') {
+			throw new \InvalidArgumentException(T::t('Enter a client secret. Leave it empty only when one is already saved.'));
+		}
+		$this->appConfig->setValueString(Application::APP_ID, 'client_id', $clientId, lazy: true, sensitive: true);
+		if ($clientSecret !== '') {
+			$this->appConfig->setValueString(Application::APP_ID, 'client_secret', $clientSecret, lazy: true, sensitive: true);
+		}
+	}
+
+	/**
 	 * @return array{string, string}
 	 */
 	private function clientCredentials(): array {
-		$id = $this->appConfig->getValueString(Application::APP_ID, 'client_id', '', lazy: true);
-		$secret = $this->appConfig->getValueString(Application::APP_ID, 'client_secret', '', lazy: true);
+		$id = $this->ownClientId();
+		$secret = $this->ownClientSecret();
 		if ($id === '' || $secret === '') {
 			$id = $this->appConfig->getValueString(Application::LEGACY_APP_ID, 'client_id', '', lazy: true);
 			$secret = $this->appConfig->getValueString(Application::LEGACY_APP_ID, 'client_secret', '', lazy: true);
 		}
 		if ($id === '' || $secret === '') {
-			throw new AuthException(T::t('No Google OAuth client is configured. Check the Google Synchronization admin settings.'));
+			throw new AuthException(T::t('No Google OAuth client is configured. Set the client ID and secret in the Google Two Way Sync admin settings.'));
 		}
 		return [$id, $secret];
+	}
+
+	private function ownClientId(): string {
+		return $this->appConfig->getValueString(Application::APP_ID, 'client_id', '', lazy: true);
+	}
+
+	private function ownClientSecret(): string {
+		return $this->appConfig->getValueString(Application::APP_ID, 'client_secret', '', lazy: true);
+	}
+
+	private function sameAsSocialLogin(string $clientId): bool {
+		if ($clientId === '') {
+			return false;
+		}
+		try {
+			$providers = $this->appConfig->getValueArray('sociallogin', 'oauth_providers', []);
+		} catch (\Throwable) {
+			return false;
+		}
+		$loginId = '';
+		if (isset($providers['google']) && is_array($providers['google'])) {
+			$loginId = (string)($providers['google']['appid'] ?? '');
+		}
+		return $loginId !== '' && hash_equals($loginId, $clientId);
 	}
 
 	public function getRedirectUri(): string {
