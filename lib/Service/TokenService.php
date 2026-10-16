@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace OCA\GoogleTwoWaySync\Service;
 
+use OCA\GoogleTwoWaySync\L10n\T;
+
 use OCA\GoogleTwoWaySync\AppInfo\Application;
 use OCA\GoogleTwoWaySync\Exception\AuthException;
 use OCP\Config\IUserConfig;
@@ -49,7 +51,7 @@ class TokenService {
 			$secret = $this->appConfig->getValueString(Application::LEGACY_APP_ID, 'client_secret', '', lazy: true);
 		}
 		if ($id === '' || $secret === '') {
-			throw new AuthException('구글 OAuth 클라이언트가 설정되어 있지 않습니다. Google Synchronization 관리자 설정을 확인하세요.');
+			throw new AuthException(T::t('No Google OAuth client is configured. Check the Google Synchronization admin settings.'));
 		}
 		return [$id, $secret];
 	}
@@ -78,7 +80,7 @@ class TokenService {
 		$expected = $this->userConfig->getValueString($userId, Application::APP_ID, 'oauth_state', '', lazy: true);
 		$this->userConfig->deleteUserConfig($userId, Application::APP_ID, 'oauth_state');
 		if ($expected === '' || !hash_equals($expected, $state)) {
-			throw new AuthException('OAuth 상태 값이 맞지 않습니다. 설정 화면에서 다시 연결하세요.');
+			throw new AuthException(T::t('The OAuth state does not match. Connect again from the settings page.'));
 		}
 		[$clientId, $secret] = $this->clientCredentials();
 		$result = $this->tokenRequest([
@@ -89,12 +91,12 @@ class TokenService {
 			'grant_type' => 'authorization_code',
 		]);
 		if (($result['refresh_token'] ?? '') === '') {
-			throw new AuthException('구글이 refresh token을 주지 않았습니다. 구글 계정 권한에서 이 앱을 지우고 다시 연결하세요.');
+			throw new AuthException(T::t('Google did not return a refresh token. Remove this app from the Google account permissions and connect again.'));
 		}
 		$granted = explode(' ', (string)($result['scope'] ?? ''));
 		$missing = array_diff(Application::SCOPES, $granted);
 		if ($missing !== []) {
-			throw new AuthException('캘린더·연락처·할 일 쓰기 권한을 모두 허용해야 합니다. 빠진 권한: ' . implode(', ', $missing));
+			throw new AuthException(T::t('Allow write access to calendar, contacts, and tasks. Missing: %s', [implode(', ', $missing)]));
 		}
 		$this->setSecret($userId, 'refresh_token', (string)$result['refresh_token']);
 		$this->storeAccessToken($userId, $result);
@@ -134,7 +136,7 @@ class TokenService {
 			return $this->legacyAccessToken($userId, $cacheKey, $forceRefresh);
 		}
 		if (!$this->isConnected($userId)) {
-			throw new AuthException('구글 계정이 연결되어 있지 않습니다.');
+			throw new AuthException(T::t('The Google account is not connected.'));
 		}
 		$expires = $this->userConfig->getValueInt($userId, Application::APP_ID, 'token_expires_at', 0, lazy: true);
 		if (!$forceRefresh && $expires > $now + 60) {
@@ -177,7 +179,7 @@ class TokenService {
 		}
 		$refresh = $this->userConfig->getValueString($userId, $app, 'refresh_token', '', lazy: true);
 		if ($refresh === '') {
-			throw new AuthException('Google Synchronization에 저장된 구글 토큰이 없습니다.');
+			throw new AuthException(T::t('Google Synchronization has no stored Google token.'));
 		}
 		$id = $this->appConfig->getValueString($app, 'client_id', '', lazy: true);
 		$secret = $this->appConfig->getValueString($app, 'client_secret', '', lazy: true);
@@ -198,7 +200,7 @@ class TokenService {
 	private function storeAccessToken(string $userId, array $result): string {
 		$token = (string)($result['access_token'] ?? '');
 		if ($token === '') {
-			throw new AuthException('구글에서 액세스 토큰을 받지 못했습니다.');
+			throw new AuthException(T::t('Google did not return an access token.'));
 		}
 		$this->setSecret($userId, 'access_token', $token);
 		$this->userConfig->setValueInt($userId, Application::APP_ID, 'token_expires_at', time() + (int)($result['expires_in'] ?? 3600), lazy: true);
@@ -222,9 +224,9 @@ class TokenService {
 		if ($response->getStatusCode() >= 400 || isset($body['error'])) {
 			$error = (string)($body['error'] ?? $response->getStatusCode());
 			if ($error === 'invalid_grant') {
-				throw new AuthException('구글 인증이 만료되었거나 취소되었습니다. 설정에서 다시 연결하세요.');
+				throw new AuthException(T::t('Google authorization expired or was revoked. Connect again in settings.'));
 			}
-			throw new AuthException('구글 토큰 요청 실패: ' . $error . ' ' . (string)($body['error_description'] ?? ''));
+			throw new AuthException(T::t('Google token request failed: %1$s %2$s', [$error, (string)($body['error_description'] ?? '')]));
 		}
 		return $body;
 	}

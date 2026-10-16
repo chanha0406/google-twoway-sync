@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace OCA\GoogleTwoWaySync\Service;
 
+use OCA\GoogleTwoWaySync\L10n\T;
+
 use OCA\GoogleTwoWaySync\AppInfo\Application;
 use OCA\GoogleTwoWaySync\Db\Collection;
 use OCA\GoogleTwoWaySync\Db\CollectionMapper;
@@ -117,7 +119,7 @@ class SyncService {
 			$col->setKind(Collection::KIND_CONTACTS);
 			$col->setGoogleId(self::CONTACTS_ID);
 			$col->setGoogleHash(CollectionMapper::hash(self::CONTACTS_ID));
-			$col->setDisplayName('구글 연락처');
+			$col->setDisplayName(T::t('Google contacts'));
 			$col->setAccessRole('owner');
 			$col->setEnabled(0);
 			$col->setInitialized(0);
@@ -132,7 +134,7 @@ class SyncService {
 				if ($e->getStatus() !== 403) {
 					throw $e;
 				}
-				throw new \RuntimeException('할 일 목록을 가져오지 못했습니다. Google Cloud에서 Tasks API를 켜고 구글 연결을 다시 누르세요.', 0, $e);
+				throw new \RuntimeException(T::t('Could not load task lists. Enable the Tasks API in Google Cloud and connect Google again.'), 0, $e);
 			}
 		}
 		return $this->state($userId);
@@ -216,8 +218,10 @@ class SyncService {
 	 * @return array{reports: list<array<string, mixed>>, requests: int, preview: bool}
 	 */
 	public function syncUser(string $userId, bool $preview = false, bool $legacy = false, bool $allowMassDelete = false, ?int $collectionId = null): array {
+		T::forUser($userId);
+		try {
 		if (!$preview && !$this->tokens->isConnected($userId)) {
-			throw new AuthException('구글 계정을 먼저 연결하세요.');
+			throw new AuthException(T::t('Connect a Google account first.'));
 		}
 		$path = Application::APP_ID . '/' . $userId;
 		$this->locking->acquireLock($path, ILockingProvider::LOCK_EXCLUSIVE);
@@ -226,6 +230,9 @@ class SyncService {
 			return $this->syncLocked($ctx, $collectionId);
 		} finally {
 			$this->locking->releaseLock($path, ILockingProvider::LOCK_EXCLUSIVE);
+		}
+			} finally {
+			T::forUser(null);
 		}
 	}
 
@@ -242,7 +249,7 @@ class SyncService {
 		foreach ($cols as $col) {
 			if (!$ctx->preview && $this->legacyImportRuns($col)) {
 				$report = new SyncReport($col->getDisplayName());
-				$report->error('Google Synchronization이 켜져 있어 건너뜁니다. 그 앱을 끄거나, occ googletwowaysync:cutover 로 가져오기 작업을 지우세요.');
+				$report->error(T::t('Skipped because Google Synchronization is enabled. Turn that app off, or remove its import jobs with occ googletwowaysync:cutover.'));
 				$reports[] = $this->withKind($report, $col);
 				continue;
 			}
@@ -255,7 +262,7 @@ class SyncService {
 						}
 					}
 					if (!isset($entries[$col->getGoogleId()])) {
-						throw new \RuntimeException('구글 캘린더 목록에 없는 캘린더입니다.');
+						throw new \RuntimeException(T::t('This calendar is not in the Google calendar list.'));
 					}
 					$entry = $entries[$col->getGoogleId()];
 					if (!$ctx->preview && (string)($entry['accessRole'] ?? '') !== $col->getAccessRole()) {
@@ -268,7 +275,7 @@ class SyncService {
 				} elseif ($col->getKind() === Collection::KIND_TASKS) {
 					$report = $this->tasks->sync($col, $ctx);
 				} else {
-					throw new \RuntimeException('알 수 없는 동기화 종류입니다.');
+					throw new \RuntimeException(T::t('Unknown sync kind.'));
 				}
 			} catch (\Throwable $e) {
 				$report = new SyncReport($col->getDisplayName());
@@ -330,7 +337,7 @@ class SyncService {
 			$col->setKind(Collection::KIND_TASKS);
 			$col->setGoogleId($googleId);
 			$col->setGoogleHash(CollectionMapper::hash($googleId));
-			$col->setDisplayName((string)($list['title'] ?? '할 일'));
+			$col->setDisplayName((string)($list['title'] ?? T::t('Tasks')));
 			$col->setAccessRole('owner');
 			$col->setLastError(null);
 			if ($isNew) {
@@ -348,7 +355,7 @@ class SyncService {
 				continue;
 			}
 			$col->setEnabled(0);
-			$col->setLastError('구글 할 일 목록에서 이 목록을 찾지 못했습니다.');
+			$col->setLastError(T::t('This list was not found in Google Tasks.'));
 			$this->collections->update($col);
 		}
 	}
@@ -378,6 +385,6 @@ class SyncService {
 		if ($this->tokens->hasLegacyToken($userId)) {
 			return new SyncContext($userId, true, true);
 		}
-		throw new AuthException('구글 계정을 먼저 연결하세요.');
+		throw new AuthException(T::t('Connect a Google account first.'));
 	}
 }

@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace OCA\GoogleTwoWaySync\Service;
 
+use OCA\GoogleTwoWaySync\L10n\T;
+
 use OCA\DAV\CalDAV\CalDavBackend;
 use OCA\GoogleTwoWaySync\Db\Collection;
 use OCA\GoogleTwoWaySync\Db\CollectionMapper;
@@ -114,7 +116,7 @@ class TaskSyncService {
 		$deletions = count(array_filter($plan, static fn (array $p) => in_array($p['action'], [SyncReport::PULL_DELETE, SyncReport::PUSH_DELETE], true)));
 		$blockDeletes = !$ctx->allowMassDelete && SyncReport::tooManyDeletions($deletions, max(count($states), count($local)));
 		if ($blockDeletes) {
-			$report->error('한 번에 지울 할 일이 ' . $deletions . '건이라 삭제를 보류했습니다. 확인 후 occ googletwowaysync:sync --allow-mass-delete 로 진행하세요.');
+			$report->error(T::t('Refused to delete %s tasks at once. Check them, then continue with occ googletwowaysync:sync --allow-mass-delete.', [$deletions]));
 		}
 
 		$failed = false;
@@ -129,7 +131,7 @@ class TaskSyncService {
 			if ($isPush && ($pushBlocked || $this->writes >= self::MAX_WRITES_PER_RUN)) {
 				if (!$pushBlocked && !$ctx->preview) {
 					$pushBlocked = true;
-					$report->error('한 번에 올릴 수 있는 수(' . self::MAX_WRITES_PER_RUN . ')를 넘어 나머지는 다음 동기화로 미룹니다.');
+					$report->error(T::t('The per-run write limit (%s) was reached. The rest waits for the next sync.', [self::MAX_WRITES_PER_RUN]));
 				}
 				if (!$ctx->preview) {
 					$failed = true;
@@ -177,18 +179,18 @@ class TaskSyncService {
 				return ['action' => 'forget'] + $p;
 			}
 			return $googleChanged
-				? ['action' => SyncReport::PULL_CREATE, 'note' => '구글에서 고쳐져 되살림'] + $p
+				? ['action' => SyncReport::PULL_CREATE, 'note' => T::t('Restored because Google changed it')] + $p
 				: ['action' => SyncReport::PUSH_DELETE] + $p;
 		}
 		if ($g['deleted']) {
 			return $localChanged
-				? ['action' => SyncReport::PUSH_CREATE, 'note' => '구글에서 지웠지만 NC에서 고쳐 다시 올림'] + $p
+				? ['action' => SyncReport::PUSH_CREATE, 'note' => T::t('Uploaded again because Nextcloud changed it after Google deleted it')] + $p
 				: ['action' => SyncReport::PULL_DELETE] + $p;
 		}
 		if ($googleChanged && $localChanged) {
 			return $g['updated'] >= (int)$obj['lastmodified']
-				? ['action' => SyncReport::PULL_UPDATE, 'note' => '양쪽 수정, 구글이 나중'] + $p
-				: ['action' => SyncReport::PUSH_UPDATE, 'note' => '양쪽 수정, NC가 나중'] + $p;
+				? ['action' => SyncReport::PULL_UPDATE, 'note' => T::t('Both sides changed; Google is newer')] + $p
+				: ['action' => SyncReport::PUSH_UPDATE, 'note' => T::t('Both sides changed; Nextcloud is newer')] + $p;
 		}
 		if ($googleChanged) {
 			return ['action' => SyncReport::PULL_UPDATE] + $p;
@@ -408,11 +410,11 @@ class TaskSyncService {
 		$object = $this->caldav->getCalendarObject($ncId, $uri);
 		$data = is_array($object) ? ($object['calendardata'] ?? '') : '';
 		if (!is_string($data) || $data === '') {
-			throw new \RuntimeException('Nextcloud 할 일을 읽지 못했습니다.');
+			throw new \RuntimeException(T::t('Could not read Nextcloud tasks.'));
 		}
 		$vcal = Reader::read($data, Reader::OPTION_FORGIVING);
 		if (!$vcal instanceof VCalendar) {
-			throw new \RuntimeException('Nextcloud 할 일을 읽지 못했습니다.');
+			throw new \RuntimeException(T::t('Could not read Nextcloud tasks.'));
 		}
 		foreach ($vcal->getComponents() as $component) {
 			if ($component->name !== 'VTODO') {
@@ -431,7 +433,7 @@ class TaskSyncService {
 				'due' => $due,
 			];
 		}
-		throw new \RuntimeException('할 일 구성요소가 없습니다.');
+		throw new \RuntimeException(T::t('The task has no to-do component.'));
 	}
 
 	/**
@@ -464,7 +466,7 @@ class TaskSyncService {
 		if (is_array($g) && isset($g['shape']['title']) && $g['shape']['title'] !== '') {
 			return (string)$g['shape']['title'];
 		}
-		return (string)($p['uri'] ?? $p['gid'] ?? '할 일');
+		return (string)($p['uri'] ?? $p['gid'] ?? T::t('Tasks'));
 	}
 
 	/**
@@ -564,7 +566,7 @@ class TaskSyncService {
 			}
 		}
 		if ($name === '') {
-			$name = '할 일';
+			$name = T::t('Tasks');
 		}
 		$suffix = ' (Google Tasks)';
 		return mb_substr($name, 0, 255 - mb_strlen($suffix)) . $suffix;

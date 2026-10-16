@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace OCA\GoogleTwoWaySync\Service;
 
+use OCA\GoogleTwoWaySync\L10n\T;
+
 use DateTimeImmutable;
 use DateTimeInterface;
 use DateTimeZone;
@@ -508,7 +510,7 @@ class EventConverter {
 		$parts = $diff['master'];
 		$n = count($diff['changed']) + count($diff['onlyGoogle']) + count($diff['onlyLocal']);
 		if ($n > 0) {
-			$parts[] = '예외 회차 ' . $n;
+			$parts[] = T::t('Exception occurrence %s', [$n]);
 		}
 		return implode(',', $parts);
 	}

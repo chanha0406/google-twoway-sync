@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace OCA\GoogleTwoWaySync\Service;
 
+use OCA\GoogleTwoWaySync\L10n\T;
+
 /**
  * One sync run of one user.
  */
@@ -19,7 +21,7 @@ class SyncContext {
 		public readonly bool $allowMassDelete = false,
 	) {
 		if ($legacy && !$preview) {
-			throw new \InvalidArgumentException('기존 앱 토큰은 미리보기에만 쓸 수 있습니다.');
+			throw new \InvalidArgumentException(T::t('The legacy app token can only be used for previews.'));
 		}
 	}
 }

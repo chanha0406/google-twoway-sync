@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace OCA\GoogleTwoWaySync\Controller;
 
+use OCA\GoogleTwoWaySync\L10n\T;
+
 use OCA\GoogleTwoWaySync\AppInfo\Application;
 use OCA\GoogleTwoWaySync\Exception\AuthException;
 use OCA\GoogleTwoWaySync\Service\SyncService;
@@ -55,7 +57,7 @@ class ConfigController extends Controller {
 	#[NoAdminRequired]
 	public function connect(): JSONResponse {
 		if ($this->userId === null) {
-			return $this->error('로그인이 필요합니다.', Http::STATUS_UNAUTHORIZED);
+			return $this->error(T::t('You need to be logged in.'), Http::STATUS_UNAUTHORIZED);
 		}
 		try {
 			return new JSONResponse(['url' => $this->tokens->buildAuthUrl($this->userId)]);
@@ -67,7 +69,7 @@ class ConfigController extends Controller {
 	#[NoAdminRequired]
 	public function disconnect(): JSONResponse {
 		if ($this->userId === null) {
-			return $this->error('로그인이 필요합니다.', Http::STATUS_UNAUTHORIZED);
+			return $this->error(T::t('You need to be logged in.'), Http::STATUS_UNAUTHORIZED);
 		}
 		$this->tokens->disconnect($this->userId);
 		return new JSONResponse($this->sync->state($this->userId));
@@ -76,7 +78,7 @@ class ConfigController extends Controller {
 	#[NoAdminRequired]
 	public function state(): JSONResponse {
 		if ($this->userId === null) {
-			return $this->error('로그인이 필요합니다.', Http::STATUS_UNAUTHORIZED);
+			return $this->error(T::t('You need to be logged in.'), Http::STATUS_UNAUTHORIZED);
 		}
 		return new JSONResponse($this->sync->state($this->userId));
 	}
@@ -84,7 +86,7 @@ class ConfigController extends Controller {
 	#[NoAdminRequired]
 	public function refreshCollections(): JSONResponse {
 		if ($this->userId === null) {
-			return $this->error('로그인이 필요합니다.', Http::STATUS_UNAUTHORIZED);
+			return $this->error(T::t('You need to be logged in.'), Http::STATUS_UNAUTHORIZED);
 		}
 		try {
 			return new JSONResponse($this->sync->refreshCollections($this->userId));
@@ -98,28 +100,28 @@ class ConfigController extends Controller {
 	#[NoAdminRequired]
 	public function saveSelection(): JSONResponse {
 		if ($this->userId === null) {
-			return $this->error('로그인이 필요합니다.', Http::STATUS_UNAUTHORIZED);
+			return $this->error(T::t('You need to be logged in.'), Http::STATUS_UNAUTHORIZED);
 		}
 		$ids = $this->request->getParam('enabled');
 		if (!is_array($ids)) {
-			return $this->error('목록이 없습니다.', Http::STATUS_BAD_REQUEST);
+			return $this->error(T::t('There is no list.'), Http::STATUS_BAD_REQUEST);
 		}
 		$this->sync->saveSelection($this->userId, array_values(array_map('intval', $ids)));
 		$state = $this->sync->state($this->userId);
-		$state['message'] = '저장했습니다.';
+		$state['message'] = T::t('Saved.');
 		return new JSONResponse($state);
 	}
 
 	#[NoAdminRequired]
 	public function sync(bool $preview = false): JSONResponse {
 		if ($this->userId === null) {
-			return $this->error('로그인이 필요합니다.', Http::STATUS_UNAUTHORIZED);
+			return $this->error(T::t('You need to be logged in.'), Http::STATUS_UNAUTHORIZED);
 		}
 		$legacy = $preview && !$this->tokens->isConnected($this->userId) && $this->tokens->hasLegacyToken($this->userId);
 		try {
 			$result = $this->sync->syncUser($this->userId, $preview, $legacy);
 		} catch (LockedException) {
-			return $this->error('이미 동기화 중입니다.', Http::STATUS_CONFLICT);
+			return $this->error(T::t('A sync is already running.'), Http::STATUS_CONFLICT);
 		} catch (AuthException $e) {
 			return $this->error($e->getMessage(), Http::STATUS_UNAUTHORIZED);
 		} catch (\Throwable $e) {
@@ -131,7 +133,7 @@ class ConfigController extends Controller {
 
 	private function loggedError(\Throwable $e): JSONResponse {
 		$this->logger->warning($e->getMessage(), ['app' => Application::APP_ID, 'exception' => $e]);
-		return $this->error($e->getMessage() !== '' ? $e->getMessage() : '구글에 연결하지 못했습니다.', Http::STATUS_BAD_GATEWAY);
+		return $this->error($e->getMessage() !== '' ? $e->getMessage() : T::t('Could not connect to Google.'), Http::STATUS_BAD_GATEWAY);
 	}
 
 	private function error(string $message, int $status): JSONResponse {

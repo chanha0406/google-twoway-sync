@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace OCA\GoogleTwoWaySync\Service;
 
+use OCA\GoogleTwoWaySync\L10n\T;
+
 /**
  * What one collection sync did, or would do in a preview.
  */
@@ -18,14 +20,14 @@ class SyncReport {
 	public const SKIP = 'skip';
 
 	private const LABELS = [
-		self::PULL_CREATE => '구글→NC 추가',
-		self::PULL_UPDATE => '구글→NC 갱신',
-		self::PULL_DELETE => '구글→NC 삭제',
-		self::PUSH_CREATE => 'NC→구글 추가',
-		self::PUSH_UPDATE => 'NC→구글 갱신',
-		self::PUSH_DELETE => 'NC→구글 삭제',
-		self::ADOPT => '이어받음',
-		self::SKIP => '건너뜀',
+		self::PULL_CREATE => 'Google → Nextcloud added',
+		self::PULL_UPDATE => 'Google → Nextcloud updated',
+		self::PULL_DELETE => 'Google → Nextcloud deleted',
+		self::PUSH_CREATE => 'Nextcloud → Google added',
+		self::PUSH_UPDATE => 'Nextcloud → Google updated',
+		self::PUSH_DELETE => 'Nextcloud → Google deleted',
+		self::ADOPT => 'Adopted',
+		self::SKIP => 'Skipped',
 	];
 
 	/** @var array<string, int> */
@@ -43,7 +45,8 @@ class SyncReport {
 
 	public function add(string $action, string $label, string $detail = ''): void {
 		$this->counts[$action] = ($this->counts[$action] ?? 0) + 1;
-		$this->lines[] = '[' . self::LABELS[$action] . '] ' . $label . ($detail !== '' ? ' (' . $detail . ')' : '');
+		$actionLabel = T::t(self::LABELS[$action]);
+		$this->lines[] = '[' . $actionLabel . '] ' . $label . ($detail !== '' ? ' (' . $detail . ')' : '');
 	}
 
 	public function error(string $message): void {
@@ -54,10 +57,10 @@ class SyncReport {
 		$parts = [];
 		foreach (self::LABELS as $action => $label) {
 			if (($this->counts[$action] ?? 0) > 0) {
-				$parts[] = $label . ' ' . $this->counts[$action];
+				$parts[] = T::t($label) . ' ' . $this->counts[$action];
 			}
 		}
-		$parts[] = '유지 ' . $this->unchanged;
+		$parts[] = T::t('Unchanged %s', [$this->unchanged]);
 		return implode(', ', $parts);
 	}
 
@@ -75,7 +78,7 @@ class SyncReport {
 	public function toArray(int $maxLines = 200): array {
 		$lines = array_slice($this->lines, 0, $maxLines);
 		if (count($this->lines) > $maxLines) {
-			$lines[] = '… ' . (count($this->lines) - $maxLines) . '건 더';
+			$lines[] = T::t('… %s more', [count($this->lines) - $maxLines]);
 		}
 		return [
 			'name' => $this->name,

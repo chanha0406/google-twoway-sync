@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace OCA\GoogleTwoWaySync\Service;
 
+use OCA\GoogleTwoWaySync\L10n\T;
+
 use OCA\DAV\CalDAV\CalDavBackend;
 use OCA\GoogleTwoWaySync\Db\Collection;
 use OCA\GoogleTwoWaySync\Db\CollectionMapper;
@@ -196,7 +198,7 @@ class CalendarSyncService {
 			if (isset($processed[$uri]) || isset($byUri[$uri])) {
 				continue;
 			}
-			$plan[] = ['action' => $writable ? SyncReport::PUSH_CREATE : SyncReport::PULL_DELETE, 'uri' => $uri, 'gid' => '', 'group' => null, 'state' => null, 'note' => $writable ? '' : '읽기 전용이라 지움'];
+			$plan[] = ['action' => $writable ? SyncReport::PUSH_CREATE : SyncReport::PULL_DELETE, 'uri' => $uri, 'gid' => '', 'group' => null, 'state' => null, 'note' => $writable ? '' : T::t('Deleted because the calendar is read-only')];
 		}
 
 		$plan = array_values(array_filter($plan, static function (array $p) use ($report): bool {
@@ -210,7 +212,7 @@ class CalendarSyncService {
 		$deletions = count(array_filter($plan, static fn (array $p) => in_array($p['action'], [SyncReport::PULL_DELETE, SyncReport::PUSH_DELETE], true)));
 		$blockDeletes = !$ctx->allowMassDelete && SyncReport::tooManyDeletions($deletions, max(count($states), count($local)));
 		if ($blockDeletes) {
-			$report->error('한 번에 지울 항목이 ' . $deletions . '건이라 삭제를 보류했습니다. 확인 후 occ googletwowaysync:sync --allow-mass-delete 로 진행하세요.');
+			$report->error(T::t('Refused to delete %s items at once. Check them, then continue with occ googletwowaysync:sync --allow-mass-delete.', [$deletions]));
 		}
 
 		$contents = $this->loadContents($ncId, $plan);
@@ -271,21 +273,21 @@ class CalendarSyncService {
 				return $p + ['action' => 'forget'];
 			}
 			if ($googleChanged || !$eventWritable) {
-				return ['action' => SyncReport::PULL_CREATE, 'note' => $googleChanged ? '구글에서 고쳐져 되살림' : '읽기 전용이라 되살림'] + $p;
+				return ['action' => SyncReport::PULL_CREATE, 'note' => $googleChanged ? T::t('Restored because Google changed it') : T::t('Restored because the calendar is read-only')] + $p;
 			}
 			return ['action' => SyncReport::PUSH_DELETE] + $p;
 		}
 		if ($g['deleted']) {
 			if ($localChanged && $writable) {
-				return ['action' => SyncReport::PUSH_CREATE, 'note' => '구글에서 지웠지만 NC에서 고쳐 다시 올림'] + $p;
+				return ['action' => SyncReport::PUSH_CREATE, 'note' => T::t('Uploaded again because Nextcloud changed it after Google deleted it')] + $p;
 			}
 			return ['action' => SyncReport::PULL_DELETE] + $p;
 		}
 		if ($googleChanged && $localChanged) {
 			if (!$eventWritable || $g['updated'] >= (int)$obj['lastmodified']) {
-				return ['action' => SyncReport::PULL_UPDATE, 'note' => '양쪽 수정, 구글이 나중'] + $p;
+				return ['action' => SyncReport::PULL_UPDATE, 'note' => T::t('Both sides changed; Google is newer')] + $p;
 			}
-			return ['action' => SyncReport::PUSH_UPDATE, 'note' => '양쪽 수정, NC가 나중'] + $p;
+			return ['action' => SyncReport::PUSH_UPDATE, 'note' => T::t('Both sides changed; Nextcloud is newer')] + $p;
 		}
 		if ($googleChanged) {
 			return ['action' => SyncReport::PULL_UPDATE] + $p;
@@ -293,7 +295,7 @@ class CalendarSyncService {
 		if ($localChanged) {
 			return $eventWritable
 				? ['action' => SyncReport::PUSH_UPDATE] + $p
-				: ['action' => SyncReport::PULL_UPDATE, 'note' => '읽기 전용이라 되돌림'] + $p;
+				: ['action' => SyncReport::PULL_UPDATE, 'note' => T::t('Reverted because the calendar is read-only')] + $p;
 		}
 		return ['action' => 'none'] + $p;
 	}
@@ -337,13 +339,13 @@ class CalendarSyncService {
 				$vcal = $this->readCalendar($contents[$uri] ?? null);
 				$localGroup = $vcal === null ? null : $this->converter->groupFromCalendar($vcal, $tz);
 				if ($vcal === null || $localGroup === null) {
-					throw new \RuntimeException('Nextcloud 일정을 읽지 못했습니다');
+					throw new \RuntimeException(T::t('Could not read Nextcloud events'));
 				}
 				$diff = $this->converter->groupDiff($google, $localGroup);
 				$same = EventConverter::isSame($diff);
 				$etag = (string)$local[$uri]['etag'];
 				if ($action === SyncReport::ADOPT) {
-					$report->add($action, $this->groupLabel($g), $same ? '' : 'NC 내용 갱신: ' . EventConverter::describe($diff));
+					$report->add($action, $this->groupLabel($g), $same ? '' : T::t('Nextcloud content updated: %s', [EventConverter::describe($diff)]));
 				} elseif ($same) {
 					$report->unchanged++;
 				} else {
@@ -389,7 +391,7 @@ class CalendarSyncService {
 				$vcal = $this->readCalendar($contents[$uri] ?? null);
 				$localGroup = $vcal === null ? null : $this->converter->groupFromCalendar($vcal, $tz);
 				if ($localGroup === null) {
-					throw new \RuntimeException('Nextcloud 일정을 읽지 못했습니다');
+					throw new \RuntimeException(T::t('Could not read Nextcloud events'));
 				}
 				$diff = $this->converter->groupDiff($google, $localGroup);
 				if (EventConverter::isSame($diff)) {
@@ -401,7 +403,7 @@ class CalendarSyncService {
 				}
 				$detail = trim($note . ' ' . EventConverter::describe($diff));
 				if ($diff['onlyGoogle'] !== []) {
-					$detail .= ' (구글에만 있는 예외 회차 ' . count($diff['onlyGoogle']) . '건은 그대로)';
+					$detail .= T::t('(%s exception occurrences exist only on Google and were left unchanged)', [count($diff['onlyGoogle'])]);
 				}
 				$report->add($action, $this->groupLabel($g), $detail);
 				if ($ctx->preview) {
@@ -422,7 +424,7 @@ class CalendarSyncService {
 				$localGroup = $vcal === null ? null : $this->converter->groupFromCalendar($vcal, $tz);
 				[$masterEvent] = $vcal === null ? [null] : $this->converter->localEvents($vcal, $tz);
 				if ($localGroup === null || $masterEvent === null || $localGroup['master']['start'] === null) {
-					$report->add(SyncReport::SKIP, $uri, '시작 시각이 없는 일정');
+					$report->add(SyncReport::SKIP, $uri, T::t('Event without a start time'));
 					return;
 				}
 				$uid = $this->googleUid((string)$masterEvent->UID, $ncId);
@@ -457,7 +459,7 @@ class CalendarSyncService {
 				if (!$e->isNotFound()) {
 					throw $e;
 				}
-				$report->error('반복 일정의 ' . $key . ' 회차를 구글에서 찾지 못해 올리지 않았습니다');
+				$report->error(T::t('Could not find occurrence %s of a repeating event on Google, so it was not uploaded', [$key]));
 			}
 		}
 	}
@@ -488,7 +490,7 @@ class CalendarSyncService {
 			$this->applyDisplayName($newId, self::calendarDisplayName($col), $cal, $ctx->preview);
 		} else {
 			if ($ctx->preview) {
-				$report->lines[] = '[새 캘린더] ' . self::calendarDisplayName($col);
+				$report->lines[] = '[' . T::t('New calendar') . '] ' . self::calendarDisplayName($col);
 				return 0;
 			}
 			if ($cal !== null) {
@@ -519,7 +521,7 @@ class CalendarSyncService {
 	private static function calendarDisplayName(Collection $col): string {
 		$name = trim($col->getDisplayName());
 		if ($name === '') {
-			$name = '캘린더';
+			$name = T::t('Calendars');
 		}
 		$suffix = ' (Google Calendar)';
 		if (str_ends_with($name, $suffix)) {
@@ -723,7 +725,7 @@ class CalendarSyncService {
 	private function groupLabel(array $g): string {
 		$m = $g['master'] ?? [];
 		$start = is_array($m['start'] ?? null) ? ($m['start']['date'] ?? substr((string)($m['start']['dateTime'] ?? ''), 0, 10)) : '';
-		return trim((string)($m['summary'] ?? '(제목 없음)') . ' ' . $start);
+		return trim((string)($m['summary'] ?? T::t('(no title)')) . ' ' . $start);
 	}
 
 	/**

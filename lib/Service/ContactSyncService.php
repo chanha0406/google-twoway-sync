@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace OCA\GoogleTwoWaySync\Service;
 
+use OCA\GoogleTwoWaySync\L10n\T;
+
 use OCA\DAV\CardDAV\CardDavBackend;
 use OCA\GoogleTwoWaySync\Db\Collection;
 use OCA\GoogleTwoWaySync\Db\CollectionMapper;
@@ -30,6 +32,13 @@ class ContactSyncService {
 	private const IGNORE = 'ignore';
 	/** People API allows about 60 writes per minute and user */
 	private const MAX_WRITES_PER_RUN = 40;
+	/**
+	 * Critical contact reads are 90 per minute per user. connections.list is
+	 * one read per page, but people.get is one read per person, and each
+	 * create or update also spends a critical read. A backlog of local etag
+	 * changes is finished over later cron runs.
+	 */
+	private const MAX_PERSON_READS = 40;
 
 	private int $writes = 0;
 
@@ -93,7 +102,7 @@ class ContactSyncService {
 		$abId = $col->getNcId();
 		$ab = $abId > 0 ? $this->carddav->getAddressBookById($abId) : null;
 		if ($ab === null || ($ab['principaluri'] ?? '') !== 'principals/users/' . $col->getUserId()) {
-			throw new \RuntimeException('동기화할 주소록이 없습니다.');
+			throw new \RuntimeException(T::t('There is no address book to sync.'));
 		}
 
 		$cards = [];
@@ -151,6 +160,7 @@ class ContactSyncService {
 			$processed[$st->getNcUri()] = true;
 			$plan[] = $this->decide($st, $g, $cards[$st->getNcUri()] ?? null);
 		}
+		$pending = [];
 		foreach ($states as $st) {
 			$uri = $st->getNcUri();
 			if (isset($processed[$uri])) {
@@ -168,11 +178,26 @@ class ContactSyncService {
 				$plan[] = $this->decide($st, self::deleted(), $card);
 				continue;
 			}
-			if ($card !== null && $card['etag'] === $st->getNcEtag()) {
+			if ($card !== null && self::sameEtag((string)$card['etag'], $st->getNcEtag())) {
 				$report->unchanged++;
 				continue;
 			}
-			$plan[] = $this->decide($st, $this->fetchPerson($ctx, $st->getGoogleId()), $card);
+			$pending[] = [$st, $card];
+		}
+		if ($pending !== []) {
+			$fetched = $this->fetchPeople($ctx, array_map(static fn (array $row): string => $row[0]->getGoogleId(), $pending));
+			$deferred = 0;
+			foreach ($pending as [$st, $card]) {
+				$gid = $st->getGoogleId();
+				if (!isset($fetched[$gid])) {
+					$deferred++;
+					continue;
+				}
+				$plan[] = $this->decide($st, $fetched[$gid], $card);
+			}
+			if ($deferred > 0) {
+				$report->error(T::t('The per-minute Google read limit was reached, so %s contacts wait for the next sync.', [$deferred]));
+			}
 		}
 		foreach ($cards as $uri => $card) {
 			$uri = (string)$uri;
@@ -183,7 +208,7 @@ class ContactSyncService {
 				$plan[] = ['action' => SyncReport::PUSH_CREATE, 'uri' => $uri, 'gid' => '', 'group' => null, 'state' => null];
 			} elseif (str_starts_with($uri, self::LEGACY_PREFIX)) {
 				// Imported from a person that is gone, the legacy import would delete it too
-				$plan[] = ['action' => SyncReport::PULL_DELETE, 'uri' => $uri, 'gid' => '', 'group' => null, 'state' => null, 'note' => '구글에 없는 가져온 연락처'];
+				$plan[] = ['action' => SyncReport::PULL_DELETE, 'uri' => $uri, 'gid' => '', 'group' => null, 'state' => null, 'note' => T::t('Imported contact that is no longer on Google')];
 			} else {
 				$plan[] = ['action' => self::IGNORE, 'uri' => $uri, 'gid' => '', 'group' => null, 'state' => null];
 			}
@@ -199,7 +224,7 @@ class ContactSyncService {
 		$deletions = count(array_filter($plan, static fn (array $p) => in_array($p['action'], [SyncReport::PULL_DELETE, SyncReport::PUSH_DELETE], true)));
 		$blockDeletes = !$ctx->allowMassDelete && SyncReport::tooManyDeletions($deletions, max(count($states), count($cards)));
 		if ($blockDeletes) {
-			$report->error('한 번에 지울 연락처가 ' . $deletions . '건이라 삭제를 보류했습니다. 확인 후 occ googletwowaysync:sync --allow-mass-delete 로 진행하세요.');
+			$report->error(T::t('Refused to delete %s contacts at once. Check them, then continue with occ googletwowaysync:sync --allow-mass-delete.', [$deletions]));
 		}
 
 		$pullFailed = false;
@@ -214,7 +239,7 @@ class ContactSyncService {
 			if ($isPush && ($pushBlocked || $this->writes >= self::MAX_WRITES_PER_RUN)) {
 				if (!$pushBlocked && !$ctx->preview) {
 					$pushBlocked = true;
-					$report->error('한 번에 올릴 수 있는 수(' . self::MAX_WRITES_PER_RUN . ')를 넘어 나머지는 다음 동기화로 미룹니다.');
+					$report->error(T::t('The per-run write limit (%s) was reached. The rest waits for the next sync.', [self::MAX_WRITES_PER_RUN]));
 				}
 				if (!$ctx->preview) {
 					continue;
@@ -259,24 +284,24 @@ class ContactSyncService {
 	private function decide(ObjectState $st, array $g, ?array $card): array {
 		$p = ['uri' => $st->getNcUri(), 'gid' => $st->getGoogleId(), 'group' => $g, 'state' => $st, 'note' => ''];
 		$googleChanged = $g['deleted'] || $g['fp'] !== $st->getGoogleFp();
-		$localChanged = $card !== null && $card['etag'] !== $st->getNcEtag();
+		$localChanged = $card !== null && !self::sameEtag((string)$card['etag'], $st->getNcEtag());
 		if ($card === null) {
 			if ($g['deleted']) {
 				return ['action' => 'forget'] + $p;
 			}
 			return $googleChanged
-				? ['action' => SyncReport::PULL_CREATE, 'note' => '구글에서 고쳐져 되살림'] + $p
+				? ['action' => SyncReport::PULL_CREATE, 'note' => T::t('Restored because Google changed it')] + $p
 				: ['action' => SyncReport::PUSH_DELETE] + $p;
 		}
 		if ($g['deleted']) {
 			return $localChanged
-				? ['action' => SyncReport::PUSH_CREATE, 'note' => '구글에서 지웠지만 NC에서 고쳐 다시 올림'] + $p
+				? ['action' => SyncReport::PUSH_CREATE, 'note' => T::t('Uploaded again because Nextcloud changed it after Google deleted it')] + $p
 				: ['action' => SyncReport::PULL_DELETE] + $p;
 		}
 		if ($googleChanged && $localChanged) {
 			return $g['updated'] >= (int)$card['lastmodified']
-				? ['action' => SyncReport::PULL_UPDATE, 'note' => '양쪽 수정, 구글이 나중'] + $p
-				: ['action' => SyncReport::PUSH_UPDATE, 'note' => '양쪽 수정, NC가 나중'] + $p;
+				? ['action' => SyncReport::PULL_UPDATE, 'note' => T::t('Both sides changed; Google is newer')] + $p
+				: ['action' => SyncReport::PUSH_UPDATE, 'note' => T::t('Both sides changed; Nextcloud is newer')] + $p;
 		}
 		if ($googleChanged) {
 			return ['action' => SyncReport::PULL_UPDATE] + $p;
@@ -308,7 +333,7 @@ class ContactSyncService {
 				return;
 
 			case self::IGNORE:
-				$report->add(SyncReport::SKIP, $this->label($p, $cards), '전환 전에 NC에만 있던 연락처라 올리지 않음');
+				$report->add(SyncReport::SKIP, $this->label($p, $cards), T::t('Not uploaded because the contact existed only in Nextcloud before the switch'));
 				if (!$ctx->preview) {
 					$ignored = new ObjectState();
 					$ignored->setCollectionId($col->getId());
@@ -345,7 +370,7 @@ class ContactSyncService {
 				$person = $g['person'];
 				$card = $this->readCard($cards[$uri]['carddata'] ?? null);
 				if ($card === null) {
-					throw new \RuntimeException('Nextcloud 연락처를 읽지 못했습니다');
+					throw new \RuntimeException(T::t('Could not read Nextcloud contacts'));
 				}
 				$google = $this->converter->fromGoogle($person, $groupNames);
 				$fields = $this->converter->diff($google, $this->converter->fromVCard($card), array_merge(ContactConverter::FIELDS, ContactConverter::PULL_ONLY));
@@ -354,11 +379,11 @@ class ContactSyncService {
 				// Adopted cards keep the photo the legacy import downloaded
 				$photoChanged = $action === SyncReport::PULL_UPDATE && $photo !== $oldPhoto;
 				if ($action === SyncReport::ADOPT) {
-					$report->add($action, $this->personLabel($person), $fields === [] ? '' : 'NC 내용 갱신: ' . implode(',', $fields));
+					$report->add($action, $this->personLabel($person), $fields === [] ? '' : T::t('Nextcloud content updated: %s', [implode(',', $fields)]));
 				} elseif ($fields === [] && !$photoChanged) {
 					$report->unchanged++;
 				} else {
-					$report->add($action, $this->personLabel($person), trim($note . ' ' . implode(',', $fields) . ($photoChanged ? ' 사진' : '')));
+					$report->add($action, $this->personLabel($person), trim($note . ' ' . implode(',', $fields) . ($photoChanged ? ' ' . T::t('photo') : '')));
 				}
 				if ($ctx->preview) {
 					return;
@@ -409,7 +434,7 @@ class ContactSyncService {
 				$person = $g['person'];
 				$card = $this->readCard($cards[$uri]['carddata'] ?? null);
 				if ($card === null) {
-					throw new \RuntimeException('Nextcloud 연락처를 읽지 못했습니다');
+					throw new \RuntimeException(T::t('Could not read Nextcloud contacts'));
 				}
 				$localC = $this->converter->fromVCard($card);
 				$fields = $this->converter->diff($this->converter->fromGoogle($person, $groupNames), $localC, ContactConverter::FIELDS);
@@ -437,7 +462,7 @@ class ContactSyncService {
 			case SyncReport::PUSH_CREATE:
 				$card = $this->readCard($cards[$uri]['carddata'] ?? null);
 				if ($card === null) {
-					throw new \RuntimeException('Nextcloud 연락처를 읽지 못했습니다');
+					throw new \RuntimeException(T::t('Could not read Nextcloud contacts'));
 				}
 				$report->add($action, $this->label($p, $cards), $note);
 				if ($ctx->preview) {
@@ -474,7 +499,7 @@ class ContactSyncService {
 		$st->setGoogleFp((string)$g['fp']);
 		$st->setGoogleUpdated((int)$g['updated']);
 		$st->setNcUri($uri);
-		$st->setNcEtag($etag);
+		$st->setNcEtag(self::canonicalEtag($etag));
 		$st->setIgnored(0);
 		$st->setExtra(json_encode(['photo' => $photo]) ?: null);
 		$st->setLastSync(time());
@@ -541,16 +566,65 @@ class ContactSyncService {
 	/**
 	 * @return array<string, mixed>
 	 */
-	private function fetchPerson(SyncContext $ctx, string $rn): array {
-		try {
-			$person = $this->google->request($ctx, 'GET', GoogleClient::PEOPLE . $rn, ['personFields' => ContactConverter::PERSON_FIELDS]);
-		} catch (GoogleApiException $e) {
-			if ($e->isNotFound()) {
-				return self::deleted();
+	/**
+	 * People reads for contacts that changed only on the Nextcloud side.
+	 * At most MAX_PERSON_READS are fetched; the rest stay for the next run.
+	 * A missing entry means the person was not fetched, not that it was deleted.
+	 *
+	 * @param list<string> $resourceNames
+	 * @return array<string, array<string, mixed>>
+	 */
+	private function fetchPeople(SyncContext $ctx, array $resourceNames): array {
+		$names = [];
+		foreach ($resourceNames as $rn) {
+			if ($rn !== '') {
+				$names[$rn] = $rn;
 			}
-			throw $e;
 		}
-		return self::entry($person);
+		$names = array_slice(array_values($names), 0, self::MAX_PERSON_READS);
+		$out = [];
+		foreach (array_chunk($names, self::MAX_PERSON_READS) as $chunk) {
+			try {
+				$result = $this->google->request($ctx, 'GET', GoogleClient::PEOPLE . 'people:batchGet', [
+					'personFields' => ContactConverter::PERSON_FIELDS,
+					'resourceNames' => $chunk,
+				]);
+			} catch (GoogleApiException $e) {
+				if ($e->isRateLimit()) {
+					break;
+				}
+				throw $e;
+			}
+			foreach (($result['responses'] ?? []) as $row) {
+				if (!is_array($row)) {
+					continue;
+				}
+				$person = $row['person'] ?? null;
+				$rn = (string)($row['requestedResourceName'] ?? (is_array($person) ? ($person['resourceName'] ?? '') : ''));
+				if ($rn === '') {
+					continue;
+				}
+				$status = (int)($row['httpStatusCode'] ?? 200);
+				if ($status === 404 || $status === 410) {
+					$out[$rn] = self::deleted();
+					continue;
+				}
+				if ($status >= 400 || !is_array($person)) {
+					continue;
+				}
+				$out[$rn] = self::entry($person);
+			}
+		}
+		return $out;
+	}
+
+	private static function sameEtag(string $a, string $b): bool {
+		return self::canonicalEtag($a) === self::canonicalEtag($b);
+	}
+
+	/** CardDAV sometimes stores the etag with quotes and sometimes without. */
+	private static function canonicalEtag(string $etag): string {
+		return trim($etag, '"');
 	}
 
 	/**
@@ -588,11 +662,11 @@ class ContactSyncService {
 	 */
 	private function personLabel(?array $person): string {
 		if ($person === null) {
-			return '(이름 없음)';
+			return T::t('(no name)');
 		}
 		$name = $this->converter->displayName($person);
 		if ($name === '') {
-			$name = (string)($person['emailAddresses'][0]['value'] ?? $person['phoneNumbers'][0]['value'] ?? $person['resourceName'] ?? '(이름 없음)');
+			$name = (string)($person['emailAddresses'][0]['value'] ?? $person['phoneNumbers'][0]['value'] ?? $person['resourceName'] ?? T::t('(no name)'));
 		}
 		return $name;
 	}

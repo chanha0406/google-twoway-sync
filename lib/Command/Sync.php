@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace OCA\GoogleTwoWaySync\Command;
 
+use OCA\GoogleTwoWaySync\L10n\T;
+
 use OCA\GoogleTwoWaySync\Service\SyncService;
 use OCP\IUserManager;
 use Symfony\Component\Console\Command\Command;
@@ -22,25 +24,25 @@ class Sync extends Command {
 
 	protected function configure(): void {
 		$this->setName('googletwowaysync:sync')
-			->setDescription('켠 구글 캘린더·연락처를 양방향 동기화합니다')
-			->addArgument('user', InputArgument::REQUIRED, 'Nextcloud 사용자 ID')
-			->addOption('preview', 'p', InputOption::VALUE_NONE, '아무것도 쓰지 않고 할 일만 보여줌')
-			->addOption('legacy-token', null, InputOption::VALUE_NONE, '미리보기에 Google Synchronization의 읽기 전용 토큰을 씀')
-			->addOption('collection', 'c', InputOption::VALUE_REQUIRED, '이 항목 id만 (꺼져 있어도)')
-			->addOption('allow-mass-delete', null, InputOption::VALUE_NONE, '한 번에 많이 지우는 것을 허용')
-			->addOption('details', 'd', InputOption::VALUE_NONE, '항목별 내용을 모두 출력');
+			->setDescription(T::t('Sync enabled Google calendars and contacts in both directions'))
+			->addArgument('user', InputArgument::REQUIRED, T::t('Nextcloud user id'))
+			->addOption('preview', 'p', InputOption::VALUE_NONE, T::t('Show what would change without writing anything'))
+			->addOption('legacy-token', null, InputOption::VALUE_NONE, T::t('Use the Google Synchronization read-only token for the preview'))
+			->addOption('collection', 'c', InputOption::VALUE_REQUIRED, T::t('Only this item id (even if it is off)'))
+			->addOption('allow-mass-delete', null, InputOption::VALUE_NONE, T::t('Allow deleting many items at once'))
+			->addOption('details', 'd', InputOption::VALUE_NONE, T::t('Print every item'));
 	}
 
 	protected function execute(InputInterface $input, OutputInterface $output): int {
 		$userId = (string)$input->getArgument('user');
 		if ($this->users->get($userId) === null) {
-			$output->writeln('<error>없는 사용자입니다.</error>');
+			$output->writeln('<error>' . T::t('Unknown user.') . '</error>');
 			return 1;
 		}
 		$preview = (bool)$input->getOption('preview');
 		$legacy = (bool)$input->getOption('legacy-token');
 		if ($legacy && !$preview) {
-			$output->writeln('<error>--legacy-token은 --preview와 함께만 씁니다.</error>');
+			$output->writeln('<error>' . T::t('--legacy-token can only be used together with --preview.') . '</error>');
 			return 1;
 		}
 		$collection = $input->getOption('collection');
@@ -58,11 +60,11 @@ class Sync extends Command {
 		}
 		$failed = false;
 		$groups = [
-			'캘린더' => array_values(array_filter($result['reports'], static fn (array $r) => ($r['kind'] ?? '') === 'calendar')),
-			'연락처' => array_values(array_filter($result['reports'], static fn (array $r) => ($r['kind'] ?? '') === 'contacts')),
+			T::t('Calendars') => array_values(array_filter($result['reports'], static fn (array $r) => ($r['kind'] ?? '') === 'calendar')),
+			T::t('Contacts') => array_values(array_filter($result['reports'], static fn (array $r) => ($r['kind'] ?? '') === 'contacts')),
 		];
-		$known = array_merge($groups['캘린더'], $groups['연락처']);
-		$groups['기타'] = array_values(array_filter($result['reports'], static fn (array $r) => !in_array($r, $known, true)));
+		$known = array_merge($groups[T::t('Calendars')], $groups[T::t('Contacts')]);
+		$groups[T::t('Other')] = array_values(array_filter($result['reports'], static fn (array $r) => !in_array($r, $known, true)));
 		foreach ($groups as $title => $reports) {
 			if ($reports === []) {
 				continue;
@@ -82,11 +84,11 @@ class Sync extends Command {
 					$output->writeln('  ' . $line);
 				}
 				if (!$input->getOption('details') && count($report['lines']) > 10) {
-					$output->writeln('  … --details로 전체 보기');
+					$output->writeln('  ' . T::t('… pass --details to see everything'));
 				}
 			}
 		}
-		$output->writeln(($preview ? '미리보기, ' : '') . '구글 API 요청 ' . $result['requests'] . '번');
+		$output->writeln(($preview ? T::t('Preview, ') : '') . T::t('Google API requests: %s', [$result['requests']]));
 		return $failed ? 2 : 0;
 	}
 }

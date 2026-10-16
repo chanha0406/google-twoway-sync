@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace OCA\GoogleTwoWaySync\Settings;
 
+use OCA\GoogleTwoWaySync\L10n\T;
+
 use OCA\GoogleTwoWaySync\AppInfo\Application;
 use OCP\IURLGenerator;
 use OCP\Settings\IIconSection;
@@ -19,7 +21,7 @@ class PersonalSection implements IIconSection {
 	}
 
 	public function getName(): string {
-		return '구글 양방향 동기화';
+		return T::t('Google two-way sync');
 	}
 
 	public function getPriority(): int {

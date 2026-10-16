@@ -1,3 +1,13 @@
+function t(text) {
+	if (typeof window.t === 'function') {
+		return window.t('googletwowaysync', text)
+	}
+	if (window.OC && window.OC.L10N && typeof window.OC.L10N.translate === 'function') {
+		return window.OC.L10N.translate('googletwowaysync', text)
+	}
+	return text
+}
+
 function requestToken() {
 	if (window.OC && window.OC.requestToken) {
 		return window.OC.requestToken
@@ -43,26 +53,26 @@ function init() {
 	}
 
 	function formatTime(stamp) {
-		return stamp ? '마지막 동기화 ' + new Date(stamp * 1000).toLocaleString() : '아직 동기화하지 않음'
+		return stamp ? t('Last sync') + ' ' + new Date(stamp * 1000).toLocaleString() : t('Not synced yet')
 	}
 
 	function render(next) {
 		redirect.textContent = next.redirectUri || ''
 		if (next.connected && next.tasksScope) {
-			account.textContent = '연결되어 있습니다. 캘린더·연락처·할 일 쓰기 권한이 있습니다.'
+			account.textContent = t('Connected. Write access to calendar, contacts, and tasks is granted.')
 		} else if (next.connected) {
-			account.textContent = '연결되어 있습니다. 할 일을 맞추려면 구글 연결을 다시 눌러 할 일 권한을 허용하세요.'
+			account.textContent = t('Connected. To sync tasks, press Connect Google again and allow task access.')
 		} else if (next.legacyToken) {
-			account.textContent = '아직 연결하지 않았습니다. Google Synchronization의 읽기 권한으로 목록과 미리보기만 됩니다.'
+			account.textContent = t('Not connected yet. Google Synchronization\'s read access can only list items and preview.')
 		} else {
-			account.textContent = '아직 연결하지 않았습니다.'
+			account.textContent = t('Not connected yet.')
 		}
 		const collections = next.collections || []
-		fillList(calendarList, collections.filter((col) => col.kind === 'calendar'), '캘린더가 없습니다. 목록 다시 가져오기를 누르세요.', true)
-		fillList(contactList, collections.filter((col) => col.kind === 'contacts'), '연락처가 없습니다. 목록 다시 가져오기를 누르세요.', false)
+		fillList(calendarList, collections.filter((col) => col.kind === 'calendar'), t('No calendars. Press Reload list.'), true)
+		fillList(contactList, collections.filter((col) => col.kind === 'contacts'), t('No contacts. Press Reload list.'), false)
 		const taskEmpty = next.connected && !next.tasksScope
-			? '할 일 권한이 없습니다. 구글 연결을 다시 눌러 허용하세요.'
-			: '할 일 목록이 없습니다. 목록 다시 가져오기를 누르세요.'
+			? t('Task access is missing. Press Connect Google again and allow it.')
+			: t('No task lists. Press Reload list.')
 		fillList(taskList, collections.filter((col) => col.kind === 'tasks'), taskEmpty, false)
 	}
 
@@ -100,11 +110,11 @@ function init() {
 			}
 			const name = document.createElement('span')
 			name.className = 'name'
-			name.textContent = col.name || (showMode ? '캘린더' : '연락처')
+			name.textContent = col.name || (showMode ? t('Calendar') : t('Contact'))
 			main.appendChild(name)
 			const badge = document.createElement('span')
 			badge.className = 'badge' + (col.writable ? ' write' : '')
-			badge.textContent = col.writable ? '양방향' : '읽기 전용'
+			badge.textContent = col.writable ? t('Two-way') : t('Read only')
 			main.appendChild(badge)
 			label.appendChild(main)
 			item.appendChild(label)
@@ -114,7 +124,7 @@ function init() {
 				bits.push(col.lastSummary)
 			}
 			if (col.legacyJob) {
-				bits.push('Google Synchronization이 켜져 있어 미리보기만 됩니다')
+				bits.push(t('Google Synchronization is enabled, so this is preview only'))
 			}
 			const meta = document.createElement('p')
 			meta.className = 'meta'
@@ -140,7 +150,7 @@ function init() {
 		if (payload.preview) {
 			const banner = document.createElement('p')
 			banner.className = 'banner'
-			banner.textContent = '미리보기입니다. 아무것도 쓰지 않았습니다.'
+			banner.textContent = t('This is a preview. Nothing was written.')
 			result.appendChild(banner)
 		}
 		function append(title, reports) {
@@ -156,13 +166,13 @@ function init() {
 				const summary = document.createElement('p')
 				summary.textContent = report.name + ': ' + report.summary
 				block.appendChild(summary)
-				const lines = report.errors.map((error) => '오류: ' + error).concat(report.lines)
+				const lines = report.errors.map((error) => t('Error') + ': ' + error).concat(report.lines)
 				if (lines.length > 0) {
 					const list = document.createElement('ul')
 					lines.forEach((line) => {
 						const item = document.createElement('li')
 						item.textContent = line
-						if (line.startsWith('오류:')) {
+						if (line.startsWith(t('Error') + ':')) {
 							item.className = 'error'
 						}
 						list.appendChild(item)
@@ -172,10 +182,10 @@ function init() {
 				result.appendChild(block)
 			})
 		}
-		append('캘린더', payload.reports.filter((report) => report.kind === 'calendar'))
-		append('연락처', payload.reports.filter((report) => report.kind === 'contacts'))
-		append('할 일', payload.reports.filter((report) => report.kind === 'tasks'))
-		append('기타', payload.reports.filter((report) => report.kind !== 'calendar' && report.kind !== 'contacts' && report.kind !== 'tasks'))
+		append(t('Calendar'), payload.reports.filter((report) => report.kind === 'calendar'))
+		append(t('Contact'), payload.reports.filter((report) => report.kind === 'contacts'))
+		append(t('Tasks'), payload.reports.filter((report) => report.kind === 'tasks'))
+		append(t('Other'), payload.reports.filter((report) => report.kind !== 'calendar' && report.kind !== 'contacts' && report.kind !== 'tasks'))
 	}
 
 	async function call(path, method, body) {
@@ -194,7 +204,7 @@ function init() {
 			})
 			const payload = await response.json()
 			if (!response.ok) {
-				throw new Error(payload.error || '요청에 실패했습니다.')
+				throw new Error(payload.error || t('Request failed.'))
 			}
 			if (payload.collections) {
 				render(payload)
@@ -207,7 +217,7 @@ function init() {
 			}
 			return payload
 		} catch (error) {
-			setStatus(error.message || '요청에 실패했습니다.', true)
+			setStatus(error.message || t('Request failed.'), true)
 			return null
 		} finally {
 			setBusy(false)
@@ -237,20 +247,20 @@ function init() {
 	})
 	document.getElementById('gtsync-preview').addEventListener('click', async () => {
 		result.hidden = false
-		result.textContent = '미리보기 중…'
+		result.textContent = t('Previewing…')
 		showResult(await call('sync', 'POST', { preview: true }))
 	})
 	document.getElementById('gtsync-sync').addEventListener('click', async () => {
 		result.hidden = false
-		result.textContent = '동기화 중…'
+		result.textContent = t('Syncing…')
 		showResult(await call('sync', 'POST', { preview: false }))
 	})
 
 	const params = new URLSearchParams(window.location.search)
 	if (params.get('gtsyncError')) {
-		setStatus('구글 연결 실패: ' + params.get('gtsyncError'), true)
+		setStatus(t('Google connection failed: ') + params.get('gtsyncError'), true)
 	} else if (params.get('gtsyncConnected')) {
-		setStatus('구글 계정을 연결했습니다.', false)
+		setStatus(t('Connected the Google account.'), false)
 	}
 	render(state)
 }
