@@ -1,0 +1,179 @@
+#gtsync {
+	max-width: 46rem;
+}
+
+#gtsync h3 {
+	display: block;
+	margin: 0 0 0.6rem;
+	font-size: 1.05rem;
+}
+
+#gtsync .lead,
+#gtsync .note,
+#gtsync .settings-hint {
+	display: block;
+	margin: 0 0 0.75rem;
+	color: var(--color-text-maxcontrast);
+	line-height: 1.45;
+	overflow-wrap: anywhere;
+}
+
+#gtsync .block {
+	margin: 1.25rem 0 0;
+}
+
+#gtsync code {
+	display: block;
+	margin: 0 0 0.75rem;
+	padding: 0.45rem 0.6rem;
+	overflow-wrap: anywhere;
+	word-break: break-all;
+	user-select: all;
+	background: var(--color-background-dark);
+	border-radius: var(--border-radius);
+}
+
+#gtsync .actions {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: 0.5rem;
+	margin: 0.75rem 0 0.25rem;
+}
+
+#gtsync .actions button {
+	margin: 0;
+}
+
+#gtsync .collections {
+	list-style: none;
+	margin: 0;
+	padding: 0;
+	border: 1px solid var(--color-border);
+	border-radius: var(--border-radius-large, 12px);
+	overflow: hidden;
+}
+
+#gtsync .collections li {
+	margin: 0;
+	padding: 0.65rem 0.8rem;
+	border-bottom: 1px solid var(--color-border);
+}
+
+#gtsync .collections li:last-child {
+	border-bottom: 0;
+}
+
+#gtsync .collections li.empty {
+	color: var(--color-text-maxcontrast);
+}
+
+#gtsync .row {
+	display: flex;
+	align-items: flex-start;
+	gap: 0.55rem;
+	margin: 0;
+	min-width: 0;
+}
+
+#gtsync .row input[type="checkbox"] {
+	position: static;
+	flex: 0 0 auto;
+	margin: 0.15rem 0 0;
+}
+
+#gtsync .main {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: 0.4rem 0.5rem;
+	min-width: 0;
+}
+
+#gtsync .swatch {
+	flex: 0 0 auto;
+	width: 0.85rem;
+	height: 0.85rem;
+	border-radius: 50%;
+	box-shadow: inset 0 0 0 1px var(--color-box-shadow);
+}
+
+#gtsync .name {
+	min-width: 0;
+	overflow-wrap: anywhere;
+	line-height: 1.35;
+}
+
+#gtsync .badge {
+	flex: 0 0 auto;
+	padding: 0.05rem 0.45rem;
+	border: 1px solid var(--color-border-dark, var(--color-border));
+	border-radius: 999px;
+	color: var(--color-text-maxcontrast);
+	font-size: 0.75rem;
+	line-height: 1.4;
+	white-space: nowrap;
+}
+
+#gtsync .badge.write {
+	color: var(--color-success);
+	border-color: color-mix(in srgb, var(--color-success) 55%, var(--color-border));
+}
+
+#gtsync .meta {
+	display: block;
+	margin: 0.25rem 0 0 1.55rem;
+	color: var(--color-text-maxcontrast);
+	font-size: 0.85rem;
+	line-height: 1.4;
+	overflow-wrap: anywhere;
+}
+
+#gtsync .error {
+	color: var(--color-error);
+}
+
+#gtsync .ok {
+	color: var(--color-success);
+}
+
+#gtsync .result {
+	margin-top: 0.75rem;
+	max-height: 30rem;
+	overflow: auto;
+	padding: 0.75rem 0.9rem;
+	border: 1px solid var(--color-border);
+	border-radius: var(--border-radius-large, 12px);
+	background: var(--color-main-background);
+}
+
+#gtsync .result h4 {
+	margin: 0.8rem 0 0.35rem;
+	font-size: 0.95rem;
+}
+
+#gtsync .result h4:first-child,
+#gtsync .result .banner + h4 {
+	margin-top: 0;
+}
+
+#gtsync .result .banner {
+	margin: 0 0 0.6rem;
+	color: var(--color-text-maxcontrast);
+}
+
+#gtsync .result .report {
+	margin: 0 0 0.7rem;
+}
+
+#gtsync .result .report p,
+#gtsync .result .report li {
+	margin: 0.15rem 0;
+	overflow-wrap: anywhere;
+	line-height: 1.4;
+}
+
+#gtsync .result ul {
+	margin: 0.2rem 0 0;
+	padding-left: 1.1rem;
+}

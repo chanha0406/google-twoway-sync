@@ -1,0 +1,29 @@
+<?xml version="1.0"?>
+<info xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="https://apps.nextcloud.com/schema/apps/info.xsd">
+	<id>googletwowaysync</id>
+	<name>Google Two Way Sync</name>
+	<summary>Sync Google calendars, contacts, and tasks with Nextcloud in both directions.</summary>
+	<description><![CDATA[Syncs Google calendars, contacts, and tasks with Nextcloud in both directions using the Google Calendar API, People API, and Tasks API. Each task list gets its own calendar that holds only tasks, separate from event calendars. If the same item is changed on both sides, the later change is kept.]]></description>
+	<version>1.0.0</version>
+	<licence>agpl</licence>
+	<author mail="chanha0406@gmail.com" homepage="https://github.com/chanha0406/google-twoway-sync">YouCha</author>
+	<namespace>GoogleTwoWaySync</namespace>
+	<category>integration</category>
+	<website>https://github.com/chanha0406/google-twoway-sync</website>
+	<bugs>https://github.com/chanha0406/google-twoway-sync/issues</bugs>
+	<dependencies>
+		<nextcloud min-version="32" max-version="35"/>
+	</dependencies>
+	<background-jobs>
+		<job>OCA\GoogleTwoWaySync\BackgroundJob\SyncJob</job>
+	</background-jobs>
+	<commands>
+		<command>OCA\GoogleTwoWaySync\Command\Collections</command>
+		<command>OCA\GoogleTwoWaySync\Command\Sync</command>
+		<command>OCA\GoogleTwoWaySync\Command\Cutover</command>
+	</commands>
+	<settings>
+		<personal>OCA\GoogleTwoWaySync\Settings\Personal</personal>
+		<personal-section>OCA\GoogleTwoWaySync\Settings\PersonalSection</personal-section>
+	</settings>
+</info>
