@@ -113,7 +113,8 @@ class SyncService {
 				$this->collections->update($col);
 			}
 		}
-		if ($this->collections->findByGoogleId($userId, Collection::KIND_CONTACTS, self::CONTACTS_ID) === null) {
+		$contacts = $this->collections->findByGoogleId($userId, Collection::KIND_CONTACTS, self::CONTACTS_ID);
+		if ($contacts === null) {
 			$col = new Collection();
 			$col->setUserId($userId);
 			$col->setKind(Collection::KIND_CONTACTS);
@@ -126,6 +127,12 @@ class SyncService {
 			$col->setLastSync(0);
 			$col->setNcId($this->contacts->defaultAddressBook($userId));
 			$this->collections->insert($col);
+		} else {
+			$abId = $this->contacts->resolveAddressBookId($userId, $contacts->getNcId());
+			if ($abId > 0 && $abId !== $contacts->getNcId()) {
+				$contacts->setNcId($abId);
+				$this->collections->update($contacts);
+			}
 		}
 		if ($this->tokens->isConnected($userId) && $this->tokens->hasTasksScope($userId)) {
 			try {

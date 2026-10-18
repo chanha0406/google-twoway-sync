@@ -88,7 +88,7 @@ class ContactSyncService {
 				return (int)$args['address_book_key'];
 			}
 		}
-		foreach ($this->carddav->getAddressBooksForUser('principals/users/' . $userId) as $ab) {
+		foreach ($this->carddav->getUsersOwnAddressBooks('principals/users/' . $userId) as $ab) {
 			if (($ab['uri'] ?? '') === 'contacts') {
 				return (int)$ab['id'];
 			}
@@ -96,11 +96,55 @@ class ContactSyncService {
 		return 0;
 	}
 
+	/**
+	 * Stored address book id when it still belongs to the user, otherwise the
+	 * default contacts book. Returns 0 when the user has none yet.
+	 */
+	public function resolveAddressBookId(string $userId, int $ncId): int {
+		$principal = 'principals/users/' . $userId;
+		if ($ncId > 0) {
+			$ab = $this->carddav->getAddressBookById($ncId);
+			if ($ab !== null && ($ab['principaluri'] ?? '') === $principal) {
+				return $ncId;
+			}
+		}
+		return $this->defaultAddressBook($userId);
+	}
+
+	/**
+	 * Address book to sync into. Rebinds a missing or stale nc_id, and creates
+	 * the default contacts book when the user has none. Preview does not write.
+	 */
+	public function ensureAddressBook(Collection $col, bool $preview = false): int {
+		$id = $this->resolveAddressBookId($col->getUserId(), $col->getNcId());
+		if ($id === 0) {
+			if ($preview) {
+				throw new \RuntimeException(T::t('There is no address book to sync.'));
+			}
+			$principal = 'principals/users/' . $col->getUserId();
+			try {
+				$id = (int)$this->carddav->createAddressBook($principal, 'contacts', [
+					'{DAV:}displayname' => 'Contacts',
+				]);
+			} catch (\Throwable) {
+				$id = $this->defaultAddressBook($col->getUserId());
+			}
+			if ($id === 0) {
+				throw new \RuntimeException(T::t('There is no address book to sync.'));
+			}
+		}
+		if (!$preview && $id !== $col->getNcId()) {
+			$col->setNcId($id);
+			$this->collections->update($col);
+		}
+		return $id;
+	}
+
 	public function sync(Collection $col, SyncContext $ctx): SyncReport {
 		$report = new SyncReport($col->getDisplayName());
 		$this->writes = 0;
-		$abId = $col->getNcId();
-		$ab = $abId > 0 ? $this->carddav->getAddressBookById($abId) : null;
+		$abId = $this->ensureAddressBook($col, $ctx->preview);
+		$ab = $this->carddav->getAddressBookById($abId);
 		if ($ab === null || ($ab['principaluri'] ?? '') !== 'principals/users/' . $col->getUserId()) {
 			throw new \RuntimeException(T::t('There is no address book to sync.'));
 		}
