@@ -106,6 +106,62 @@ class TaskSyncService {
 			}
 		}
 
+		if ($ncId > 0) {
+			$plannedUri = [];
+			foreach ($plan as $p) {
+				if (($p['action'] ?? '') !== 'none') {
+					$plannedUri[(string)$p['uri']] = true;
+				}
+			}
+			foreach ($plan as &$p) {
+				if (($p['action'] ?? '') !== 'none') {
+					continue;
+				}
+				$due = is_array($p['group'] ?? null) ? (string)($p['group']['shape']['due'] ?? '') : '';
+				if ($due === '' || !$this->dueNeedsRepair($ncId, (string)$p['uri'])) {
+					continue;
+				}
+				$p['action'] = SyncReport::PULL_UPDATE;
+				$p['note'] = T::t('Repaired due date format for the calendar');
+				$plannedUri[(string)$p['uri']] = true;
+			}
+			unset($p);
+			foreach ($local as $uri => $obj) {
+				$uri = (string)$uri;
+				if (isset($plannedUri[$uri]) || !$this->dueNeedsRepair($ncId, $uri)) {
+					continue;
+				}
+				$st = $byUri[$uri] ?? null;
+				$gid = $st !== null ? $st->getGoogleId() : '';
+				$g = ($gid !== '' && isset($tasks[$gid])) ? $tasks[$gid] : null;
+				if ($g === null || ($g['shape']['due'] ?? '') === '') {
+					try {
+						$shape = $this->shapeFromUri($ncId, $uri);
+					} catch (\Throwable) {
+						continue;
+					}
+					if ($shape['due'] === '') {
+						continue;
+					}
+					$g = [
+						'deleted' => false,
+						'shape' => $shape,
+						'fp' => $st !== null ? $st->getGoogleFp() : sha1((string)json_encode($shape, JSON_UNESCAPED_UNICODE)),
+						'updated' => 0,
+						'parent' => '',
+					];
+				}
+				$plan[] = [
+					'action' => SyncReport::PULL_UPDATE,
+					'uri' => $uri,
+					'gid' => $gid,
+					'group' => $g,
+					'state' => $st,
+					'note' => T::t('Repaired due date format for the calendar'),
+				];
+			}
+		}
+
 		$plan = array_values(array_filter($plan, static function (array $p) use ($report): bool {
 			if ($p['action'] === 'none') {
 				$report->unchanged++;
@@ -317,16 +373,29 @@ class TaskSyncService {
 		return self::entry($task);
 	}
 
+	/**
+	 * Writes the Google list title onto the Nextcloud calendar. Used only when
+	 * Google renamed the list, not on every sync.
+	 */
+	public function applyGoogleDisplayName(Collection $col): void {
+		$ncId = $this->existingCalendarId($col);
+		if ($ncId <= 0) {
+			return;
+		}
+		$calendar = $this->caldav->getCalendarById($ncId);
+		$name = self::localName((string)$col->getDisplayName());
+		if (!is_array($calendar) || ($calendar['{DAV:}displayname'] ?? '') === $name) {
+			return;
+		}
+		$patch = new \Sabre\DAV\PropPatch(['{DAV:}displayname' => $name]);
+		$this->caldav->updateCalendar($ncId, $patch);
+		$patch->commit();
+	}
+
 	private function ensureCalendar(Collection $col): int {
 		$existing = $this->existingCalendarId($col);
 		$name = self::localName((string)$col->getDisplayName());
 		if ($existing > 0) {
-			$calendar = $this->caldav->getCalendarById($existing);
-			if (is_array($calendar) && ($calendar['{DAV:}displayname'] ?? '') !== $name) {
-				$patch = new \Sabre\DAV\PropPatch(['{DAV:}displayname' => $name]);
-				$this->caldav->updateCalendar($existing, $patch);
-				$patch->commit();
-			}
 			if ($existing !== $col->getNcId()) {
 				$col->setNcId($existing);
 				$this->collections->update($col);
@@ -422,18 +491,54 @@ class TaskSyncService {
 			}
 			$status = strtoupper((string)($component->STATUS ?? ''));
 			$percent = (string)($component->{'PERCENT-COMPLETE'} ?? '');
-			$due = '';
-			if (isset($component->DUE)) {
-				$due = $component->DUE->getDateTime()->setTimezone(new \DateTimeZone('UTC'))->format('Y-m-d');
-			}
 			return [
 				'title' => trim((string)($component->SUMMARY ?? '')),
 				'notes' => trim((string)($component->DESCRIPTION ?? '')),
 				'status' => ($status === 'COMPLETED' || $percent === '100') ? 'completed' : 'needsAction',
-				'due' => $due,
+				'due' => self::dueFromProperty($component->DUE ?? null),
 			];
 		}
 		throw new \RuntimeException(T::t('The task has no to-do component.'));
+	}
+
+	private function dueNeedsRepair(int $ncId, string $uri): bool {
+		$object = $this->caldav->getCalendarObject($ncId, $uri);
+		$data = is_array($object) ? ($object['calendardata'] ?? '') : '';
+		if (!is_string($data) || $data === '' || stripos($data, 'DUE') === false) {
+			return false;
+		}
+		try {
+			$vcal = Reader::read($data, Reader::OPTION_FORGIVING);
+			if (!$vcal instanceof VCalendar || !isset($vcal->VTODO->DUE)) {
+				return false;
+			}
+			$vcal->VTODO->DUE->getDateTime();
+			$value = (string)$vcal->VTODO->DUE->getValue();
+			return str_contains($value, '-');
+		} catch (\Throwable) {
+			return true;
+		}
+	}
+
+	/**
+	 * @param \Sabre\VObject\Property|null $due
+	 */
+	private static function dueFromProperty($due): string {
+		if ($due === null) {
+			return '';
+		}
+		try {
+			return $due->getDateTime()->setTimezone(new \DateTimeZone('UTC'))->format('Y-m-d');
+		} catch (\Throwable) {
+			$raw = trim((string)$due->getValue());
+			if (preg_match('/^(\d{4})-(\d{2})-(\d{2})$/', $raw, $m) === 1) {
+				return $m[1] . '-' . $m[2] . '-' . $m[3];
+			}
+			if (preg_match('/^(\d{4})(\d{2})(\d{2})/', $raw, $m) === 1) {
+				return $m[1] . '-' . $m[2] . '-' . $m[3];
+			}
+			return '';
+		}
 	}
 
 	/**
@@ -537,8 +642,8 @@ class TaskSyncService {
 		if ($shape['notes'] !== '') {
 			$todo->DESCRIPTION = $shape['notes'];
 		}
-		if ($shape['due'] !== '') {
-			$todo->DUE = $shape['due'];
+		if ($shape['due'] !== '' && preg_match('/^\d{4}-\d{2}-\d{2}$/', $shape['due']) === 1) {
+			$todo->add('DUE', str_replace('-', '', $shape['due']), ['VALUE' => 'DATE']);
 		}
 		$done = $shape['status'] === 'completed';
 		$todo->STATUS = $done ? 'COMPLETED' : 'NEEDS-ACTION';

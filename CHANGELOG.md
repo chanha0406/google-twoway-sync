@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.4] - 2026-10-18
+
+### Fixed
+
+- Task due dates are written as iCalendar `DATE` values so they show on the Calendar app. Existing bad `DUE:YYYY-MM-DD` values are rewritten on the next sync.
+- Nextcloud calendar (and task list) display names are no longer reset on every sync. They update only when Google renames the calendar or list.
+
 ## [1.0.3] - 2026-10-18
 
 ### Fixed

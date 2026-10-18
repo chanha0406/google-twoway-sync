@@ -77,6 +77,14 @@ class CalendarSyncService {
 	 * @param array<string, mixed> $entry the calendarList entry of the calendar
 	 */
 	public function sync(Collection $col, array $entry, SyncContext $ctx): SyncReport {
+		$googleName = (string)($entry['summaryOverride'] ?? $entry['summary'] ?? $col->getGoogleId());
+		$googleRenamed = $googleName !== $col->getDisplayName();
+		if ($googleRenamed) {
+			$col->setDisplayName($googleName);
+			if (!$ctx->preview) {
+				$this->collections->update($col);
+			}
+		}
 		$report = new SyncReport($col->getDisplayName());
 		$tz = (string)($entry['timeZone'] ?? self::DEFAULT_TZ);
 		/** @var list<array{method?: string, minutes?: int}> $defaults */
@@ -84,7 +92,7 @@ class CalendarSyncService {
 		$writable = $col->isWritable();
 		$calId = $col->getGoogleId();
 
-		$ncId = $this->resolveCalendar($col, $ctx, $report);
+		$ncId = $this->resolveCalendar($col, $ctx, $report, $googleRenamed);
 		$sameCalendar = $ncId > 0 && $ncId === $col->getNcId();
 		$states = $sameCalendar ? $this->states->findByCollection($col->getId()) : [];
 		$initialized = $sameCalendar && $col->getInitialized() === 1;
@@ -473,13 +481,31 @@ class CalendarSyncService {
 		return str_starts_with($uid, $prefix) && strlen($uid) > strlen($prefix) ? substr($uid, strlen($prefix)) : $uid;
 	}
 
-	private function resolveCalendar(Collection $col, SyncContext $ctx, SyncReport $report): int {
+	/**
+	 * Writes the Google calendar title onto the Nextcloud calendar. Used when
+	 * Google renamed it, not when the user only renamed the local calendar.
+	 */
+	public function applyGoogleDisplayName(Collection $col, bool $preview = false): void {
+		$ncId = $col->getNcId();
+		if ($ncId <= 0 || $preview) {
+			return;
+		}
+		$cal = $this->caldav->getCalendarById($ncId);
+		if ($cal === null || self::isInTrash($cal)) {
+			return;
+		}
+		$this->applyDisplayName($ncId, self::calendarDisplayName($col), $cal, false);
+	}
+
+	private function resolveCalendar(Collection $col, SyncContext $ctx, SyncReport $report, bool $googleRenamed = false): int {
 		$principal = 'principals/users/' . $col->getUserId();
 		$id = $col->getNcId();
 		if ($id > 0) {
 			$cal = $this->caldav->getCalendarById($id);
 			if ($cal !== null && !self::isInTrash($cal) && ($cal['principaluri'] ?? '') === $principal) {
-				$this->applyDisplayName($id, self::calendarDisplayName($col), $cal, $ctx->preview);
+				if ($googleRenamed) {
+					$this->applyDisplayName($id, self::calendarDisplayName($col), $cal, $ctx->preview);
+				}
 				return $id;
 			}
 		}
@@ -487,7 +513,9 @@ class CalendarSyncService {
 		$cal = $this->caldav->getCalendarByUri($principal, $uri);
 		if ($cal !== null && !self::isInTrash($cal)) {
 			$newId = (int)$cal['id'];
-			$this->applyDisplayName($newId, self::calendarDisplayName($col), $cal, $ctx->preview);
+			if ($googleRenamed) {
+				$this->applyDisplayName($newId, self::calendarDisplayName($col), $cal, $ctx->preview);
+			}
 		} else {
 			if ($ctx->preview) {
 				$report->lines[] = '[' . T::t('New calendar') . '] ' . self::calendarDisplayName($col);

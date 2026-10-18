@@ -86,6 +86,7 @@
 		"A sync is already running.": "이미 동기화 중입니다.",
 		"Could not connect to Google.": "구글에 연결하지 못했습니다.",
 		"Refused to delete %s tasks at once. Check them, then continue with occ googletwowaysync:sync --allow-mass-delete.": "한 번에 지울 할 일이 %s건이라 삭제를 보류했습니다. 확인 후 occ googletwowaysync:sync --allow-mass-delete 로 진행하세요.",
+		"Repaired due date format for the calendar": "캘린더에 보이도록 마감일 형식을 고침",
 		"Refused to delete %s contacts at once. Check them, then continue with occ googletwowaysync:sync --allow-mass-delete.": "한 번에 지울 연락처가 %s건이라 삭제를 보류했습니다. 확인 후 occ googletwowaysync:sync --allow-mass-delete 로 진행하세요.",
 		"Refused to delete %s items at once. Check them, then continue with occ googletwowaysync:sync --allow-mass-delete.": "한 번에 지울 항목이 %s건이라 삭제를 보류했습니다. 확인 후 occ googletwowaysync:sync --allow-mass-delete 로 진행하세요.",
 		"The per-run write limit (%s) was reached. The rest waits for the next sync.": "한 번에 올릴 수 있는 수(%s)를 넘어 나머지는 다음 동기화로 미룹니다.",

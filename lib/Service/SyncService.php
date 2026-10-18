@@ -96,11 +96,13 @@ class SyncService {
 			$col = $this->collections->findByGoogleId($userId, Collection::KIND_CALENDAR, $googleId);
 			$isNew = $col === null;
 			$col ??= new Collection();
+			$googleName = (string)($entry['summaryOverride'] ?? $entry['summary'] ?? $googleId);
+			$googleRenamed = !$isNew && $googleName !== $col->getDisplayName();
 			$col->setUserId($userId);
 			$col->setKind(Collection::KIND_CALENDAR);
 			$col->setGoogleId($googleId);
 			$col->setGoogleHash(CollectionMapper::hash($googleId));
-			$col->setDisplayName((string)($entry['summaryOverride'] ?? $entry['summary'] ?? $googleId));
+			$col->setDisplayName($googleName);
 			$col->setAccessRole((string)($entry['accessRole'] ?? ''));
 			$col->setColor(isset($entry['backgroundColor']) ? (string)$entry['backgroundColor'] : null);
 			if ($isNew) {
@@ -111,6 +113,9 @@ class SyncService {
 				$this->collections->insert($col);
 			} else {
 				$this->collections->update($col);
+				if ($googleRenamed) {
+					$this->calendars->applyGoogleDisplayName($col);
+				}
 			}
 		}
 		$contacts = $this->collections->findByGoogleId($userId, Collection::KIND_CONTACTS, self::CONTACTS_ID);
@@ -340,11 +345,13 @@ class SyncService {
 			$col = $this->collections->findByGoogleId($ctx->userId, Collection::KIND_TASKS, $googleId);
 			$isNew = $col === null;
 			$col ??= new Collection();
+			$googleName = (string)($list['title'] ?? T::t('Tasks'));
+			$googleRenamed = !$isNew && $googleName !== $col->getDisplayName();
 			$col->setUserId($ctx->userId);
 			$col->setKind(Collection::KIND_TASKS);
 			$col->setGoogleId($googleId);
 			$col->setGoogleHash(CollectionMapper::hash($googleId));
-			$col->setDisplayName((string)($list['title'] ?? T::t('Tasks')));
+			$col->setDisplayName($googleName);
 			$col->setAccessRole('owner');
 			$col->setLastError(null);
 			if ($isNew) {
@@ -355,6 +362,9 @@ class SyncService {
 				$this->collections->insert($col);
 			} else {
 				$this->collections->update($col);
+				if ($googleRenamed) {
+					$this->tasks->applyGoogleDisplayName($col);
+				}
 			}
 		}
 		foreach ($this->collections->findByUser($ctx->userId) as $col) {
