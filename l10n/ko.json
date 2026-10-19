@@ -151,7 +151,14 @@
 		"Previewing…": "미리보기 중…",
 		"Syncing…": "동기화 중…",
 		"Google connection failed: ": "구글 연결 실패: ",
-		"Connected the Google account.": "구글 계정을 연결했습니다."
+		"Connected the Google account.": "구글 계정을 연결했습니다.",
+		"Calendar and task list names and colors follow Google only while Nextcloud still has the last value this app wrote. After you change them in Nextcloud they stay as they are. Use Match Google name or Match Google color on that item to copy Google's value again.": "캘린더·할 일 목록의 이름과 색은, Nextcloud에 이 앱이 마지막으로 넣은 값이 그대로일 때만 구글을 따릅니다. Nextcloud에서 바꾼 뒤에는 그 값이 유지됩니다. 다시 구글과 맞추려면 해당 항목의 구글 이름 맞추기 또는 구글 색 맞추기를 누르세요.",
+		"Match Google name": "구글 이름 맞추기",
+		"Match Google color": "구글 색 맞추기",
+		"Matched to Google.": "구글 값으로 맞췄습니다.",
+		"Choose a name or a color to match.": "맞출 이름 또는 색을 고르세요.",
+		"Only calendars and task lists have a name and color.": "이름과 색은 캘린더·할 일 목록만 있습니다.",
+		"This calendar is not linked to Nextcloud yet.": "아직 Nextcloud 캘린더에 연결되지 않았습니다."
 	},
 	"pluralForm": "nplurals=1; plural=0;"
 }

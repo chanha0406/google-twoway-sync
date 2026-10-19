@@ -98,6 +98,22 @@ class ConfigController extends Controller {
 	}
 
 	#[NoAdminRequired]
+	public function matchGoogle(int $id): JSONResponse {
+		if ($this->userId === null) {
+			return $this->error(T::t('You need to be logged in.'), Http::STATUS_UNAUTHORIZED);
+		}
+		$name = filter_var($this->request->getParam('name', false), FILTER_VALIDATE_BOOLEAN);
+		$color = filter_var($this->request->getParam('color', false), FILTER_VALIDATE_BOOLEAN);
+		try {
+			return new JSONResponse($this->sync->matchGoogleAppearance($this->userId, $id, $name, $color));
+		} catch (\InvalidArgumentException $e) {
+			return $this->error($e->getMessage(), Http::STATUS_BAD_REQUEST);
+		} catch (\Throwable $e) {
+			return $this->loggedError($e);
+		}
+	}
+
+	#[NoAdminRequired]
 	public function saveSelection(): JSONResponse {
 		if ($this->userId === null) {
 			return $this->error(T::t('You need to be logged in.'), Http::STATUS_UNAUTHORIZED);

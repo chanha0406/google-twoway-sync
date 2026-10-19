@@ -14,6 +14,9 @@ $state = json_encode($_['state'], JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | 
 	<p class="lead">
 		<?php p($l->t('This app keeps working when Google Synchronization is turned off. The OAuth client is set in this app\'s admin settings. If those fields are empty, the Google Synchronization client is used instead. Cron does not run the disabled app\'s import jobs. Writing starts after you connect the Google account again on this page. Turning the old app back on resumes its import, so leave it off after the switch.')); ?>
 	</p>
+	<p class="lead">
+		<?php p($l->t('Calendar and task list names and colors follow Google only while Nextcloud still has the last value this app wrote. After you change them in Nextcloud they stay as they are. Use Match Google name or Match Google color on that item to copy Google\'s value again.')); ?>
+	</p>
 
 	<section class="block">
 		<h3><?php p($l->t('Google account')); ?></h3>

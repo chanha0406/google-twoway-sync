@@ -38,17 +38,26 @@ class SyncService {
 	public function state(string $userId): array {
 		$cols = [];
 		foreach ($this->collections->findByUser($userId) as $col) {
+			$flags = match ($col->getKind()) {
+				Collection::KIND_CALENDAR => $this->calendars->appearanceFlags($col),
+				Collection::KIND_TASKS => $this->tasks->appearanceFlags($col),
+				default => ['nameCustomized' => false, 'colorCustomized' => false],
+			};
 			$cols[] = [
 				'id' => $col->getId(),
 				'kind' => $col->getKind(),
 				'name' => $col->getDisplayName(),
-				'color' => $col->getColor(),
+				'color' => $col->getKind() === Collection::KIND_TASKS
+					? TaskSyncService::DEFAULT_COLOR
+					: $col->getColor(),
 				'writable' => $col->isWritable(),
 				'enabled' => $col->getEnabled() === 1,
 				'legacyJob' => $this->legacyImportRuns($col),
 				'lastSync' => $col->getLastSync(),
 				'lastSummary' => $col->getLastSummary(),
 				'lastError' => $col->getLastError(),
+				'nameCustomized' => $flags['nameCustomized'],
+				'colorCustomized' => $flags['colorCustomized'],
 			];
 		}
 		return [
@@ -96,15 +105,12 @@ class SyncService {
 			$col = $this->collections->findByGoogleId($userId, Collection::KIND_CALENDAR, $googleId);
 			$isNew = $col === null;
 			$col ??= new Collection();
-			$googleName = (string)($entry['summaryOverride'] ?? $entry['summary'] ?? $googleId);
-			$googleRenamed = !$isNew && $googleName !== $col->getDisplayName();
 			$col->setUserId($userId);
 			$col->setKind(Collection::KIND_CALENDAR);
 			$col->setGoogleId($googleId);
 			$col->setGoogleHash(CollectionMapper::hash($googleId));
-			$col->setDisplayName($googleName);
 			$col->setAccessRole((string)($entry['accessRole'] ?? ''));
-			$col->setColor(isset($entry['backgroundColor']) ? (string)$entry['backgroundColor'] : null);
+			$this->calendars->storeGoogleMeta($col, $entry, false);
 			if ($isNew) {
 				$col->setEnabled(0);
 				$col->setInitialized(0);
@@ -113,10 +119,8 @@ class SyncService {
 				$this->collections->insert($col);
 			} else {
 				$this->collections->update($col);
-				if ($googleRenamed) {
-					$this->calendars->applyGoogleDisplayName($col);
-				}
 			}
+			$this->calendars->syncAppearanceFor($col);
 		}
 		$contacts = $this->collections->findByGoogleId($userId, Collection::KIND_CONTACTS, self::CONTACTS_ID);
 		if ($contacts === null) {
@@ -150,6 +154,31 @@ class SyncService {
 			}
 		}
 		return $this->state($userId);
+	}
+
+	/**
+	 * Overwrites the Nextcloud calendar title and/or color with the stored Google values.
+	 *
+	 * @return array<string, mixed>
+	 */
+	public function matchGoogleAppearance(string $userId, int $collectionId, bool $name, bool $color): array {
+		if (!$name && !$color) {
+			throw new \InvalidArgumentException(T::t('Choose a name or a color to match.'));
+		}
+		$col = $this->collections->findForUser($userId, $collectionId);
+		if ($col === null) {
+			throw new \InvalidArgumentException(T::t('Unknown item: %s', [(string)$collectionId]));
+		}
+		if ($col->getKind() === Collection::KIND_CALENDAR) {
+			$this->calendars->matchGoogle($col, $name, $color);
+		} elseif ($col->getKind() === Collection::KIND_TASKS) {
+			$this->tasks->matchGoogle($col, $name, $color);
+		} else {
+			throw new \InvalidArgumentException(T::t('Only calendars and task lists have a name and color.'));
+		}
+		$state = $this->state($userId);
+		$state['message'] = T::t('Matched to Google.');
+		return $state;
 	}
 
 	/**
@@ -346,7 +375,6 @@ class SyncService {
 			$isNew = $col === null;
 			$col ??= new Collection();
 			$googleName = (string)($list['title'] ?? T::t('Tasks'));
-			$googleRenamed = !$isNew && $googleName !== $col->getDisplayName();
 			$col->setUserId($ctx->userId);
 			$col->setKind(Collection::KIND_TASKS);
 			$col->setGoogleId($googleId);
@@ -362,9 +390,7 @@ class SyncService {
 				$this->collections->insert($col);
 			} else {
 				$this->collections->update($col);
-				if ($googleRenamed) {
-					$this->tasks->applyGoogleDisplayName($col);
-				}
+				$this->tasks->syncAppearanceFor($col);
 			}
 		}
 		foreach ($this->collections->findByUser($ctx->userId) as $col) {

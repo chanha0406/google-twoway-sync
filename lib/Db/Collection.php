@@ -21,6 +21,10 @@ use OCP\AppFramework\Db\Entity;
  * @method string getAccessRole()
  * @method void setColor(?string $color)
  * @method string|null getColor()
+ * @method void setAppliedName(?string $appliedName)
+ * @method string|null getAppliedName()
+ * @method void setAppliedColor(?string $appliedColor)
+ * @method string|null getAppliedColor()
  * @method void setNcId(int $ncId)
  * @method int getNcId()
  * @method void setEnabled(int $enabled)
@@ -48,6 +52,8 @@ class Collection extends Entity {
 	protected $displayName;
 	protected $accessRole;
 	protected $color;
+	protected $appliedName;
+	protected $appliedColor;
 	protected $ncId;
 	protected $enabled;
 	protected $initialized;

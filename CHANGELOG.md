@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.5] - 2026-10-19
+
+### Changed
+
+- Calendar and task list names and colors no longer follow Google after you change them in Nextcloud. Google updates apply only while the Nextcloud value still matches the last value this app wrote.
+- Personal settings show per-item Match Google name and Match Google color buttons when the local value differs from Google.
+
 ## [1.0.4] - 2026-10-18
 
 ### Fixed

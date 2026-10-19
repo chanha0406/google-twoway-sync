@@ -48,6 +48,9 @@ function init() {
 		buttons.forEach((button) => {
 			button.disabled = busy
 		})
+		root.querySelectorAll('button.match').forEach((button) => {
+			button.disabled = busy
+		})
 	}
 
 	function formatTime(stamp) {
@@ -99,7 +102,8 @@ function init() {
 
 			const main = document.createElement('span')
 			main.className = 'main'
-			if (showMode) {
+			const showColor = col.kind === 'calendar' || col.kind === 'tasks'
+			if (showColor) {
 				const swatch = document.createElement('span')
 				swatch.className = 'swatch'
 				swatch.style.background = colorOf(col.color)
@@ -134,8 +138,41 @@ function init() {
 				error.textContent = col.lastError
 				item.appendChild(error)
 			}
+			if (col.kind === 'calendar' || col.kind === 'tasks') {
+				const actions = document.createElement('div')
+				actions.className = 'meta-actions'
+				if (col.nameCustomized) {
+					const nameBtn = document.createElement('button')
+					nameBtn.type = 'button'
+					nameBtn.className = 'match'
+					nameBtn.textContent = translate('Match Google name')
+					nameBtn.addEventListener('click', (event) => {
+						event.preventDefault()
+						matchGoogle(col.id, true, false)
+					})
+					actions.appendChild(nameBtn)
+				}
+				if (col.colorCustomized) {
+					const colorBtn = document.createElement('button')
+					colorBtn.type = 'button'
+					colorBtn.className = 'match'
+					colorBtn.textContent = translate('Match Google color')
+					colorBtn.addEventListener('click', (event) => {
+						event.preventDefault()
+						matchGoogle(col.id, false, true)
+					})
+					actions.appendChild(colorBtn)
+				}
+				if (actions.childNodes.length > 0) {
+					item.appendChild(actions)
+				}
+			}
 			list.appendChild(item)
 		})
+	}
+
+	async function matchGoogle(id, name, color) {
+		await call('collections/' + id + '/match-google', 'POST', { name, color })
 	}
 
 	function showResult(payload) {

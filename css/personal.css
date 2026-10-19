@@ -129,6 +129,20 @@
 	overflow-wrap: anywhere;
 }
 
+#gtsync .meta-actions {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 0.35rem;
+	margin: 0.35rem 0 0 1.55rem;
+}
+
+#gtsync .meta-actions .match {
+	margin: 0;
+	padding: 0.15rem 0.55rem;
+	font-size: 0.8rem;
+	line-height: 1.35;
+}
+
 #gtsync .error {
 	color: var(--color-error);
 }
