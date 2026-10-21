@@ -7,7 +7,7 @@
 	<summary lang="ko">구글 캘린더, 연락처, 할 일을 Nextcloud와 양방향으로 동기화합니다.</summary>
 	<description><![CDATA[Syncs Google calendars, contacts, and tasks with Nextcloud in both directions using the Google Calendar API, People API, and Tasks API. Each task list gets its own calendar that holds only tasks, separate from event calendars. If the same item is changed on both sides, the later change is kept.]]></description>
 	<description lang="ko"><![CDATA[구글 캘린더 API, People API, Tasks API로 캘린더, 연락처, 할 일을 Nextcloud와 양방향으로 동기화합니다. 할 일 목록마다 할 일만 담는 캘린더가 따로 생기며, 일정 캘린더와 섞이지 않습니다. 같은 항목을 양쪽에서 고치면 나중에 고친 쪽을 남깁니다.]]></description>
-	<version>1.0.6</version>
+	<version>1.0.7</version>
 	<licence>agpl</licence>
 	<author mail="chanha0406@gmail.com" homepage="https://github.com/chanha0406/google-twoway-sync">YouCha</author>
 	<namespace>GoogleTwoWaySync</namespace>

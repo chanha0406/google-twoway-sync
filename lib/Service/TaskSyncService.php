@@ -492,7 +492,7 @@ class TaskSyncService {
 		$name = self::localName((string)$col->getDisplayName());
 		if ($existing > 0) {
 			if ($existing !== $col->getNcId()) {
-				$col->setNcId($existing);
+				$this->bindCalendar($col, $existing);
 				$this->collections->update($col);
 			}
 			return $existing;
@@ -510,9 +510,7 @@ class TaskSyncService {
 		} catch (\Throwable) {
 			$id = (int)$this->caldav->createCalendar($principal, $uri . '-' . $col->getId(), $params);
 		}
-		$col->setNcId($id);
-		$col->setInitialized(0);
-		$col->setSyncToken(null);
+		$this->bindCalendar($col, $id);
 		$col->setAppliedName($name);
 		$col->setAppliedColor(self::DEFAULT_COLOR);
 		$this->collections->update($col);
@@ -532,7 +530,22 @@ class TaskSyncService {
 		}
 		$uri = 'google-tasks-' . substr($col->getGoogleHash(), 0, 32);
 		$calendar = $this->caldav->getCalendarByUri($principal, $uri);
-		return is_array($calendar) ? (int)$calendar['id'] : 0;
+		return is_array($calendar) && ($calendar['{http://owncloud.org/ns}deleted-at'] ?? null) === null
+			? (int)$calendar['id']
+			: 0;
+	}
+
+	/**
+	 * States belong to the old calendar. Kept, they make every Google task
+	 * look deleted locally and push deletes to Google, so start a full sync.
+	 */
+	private function bindCalendar(Collection $col, int $id): void {
+		if ($col->getNcId() > 0) {
+			$this->states->deleteByCollection($col->getId());
+		}
+		$col->setNcId($id);
+		$col->setInitialized(0);
+		$col->setSyncToken(null);
 	}
 
 	/**

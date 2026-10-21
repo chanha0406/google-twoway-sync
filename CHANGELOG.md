@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.7] - 2026-10-21
+
+### Fixed
+
+- When the contacts address book or a task list calendar is replaced, the old sync state is cleared and a full sync runs. Before, every Google item looked deleted locally and deletes were pushed to Google.
+- A task list calendar in the Nextcloud trash is no longer used for syncing; a new calendar is created.
+
 ## [1.0.6] - 2026-10-20
 
 ### Fixed
