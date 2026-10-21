@@ -142,26 +142,10 @@ function init() {
 				const actions = document.createElement('div')
 				actions.className = 'meta-actions'
 				if (col.nameCustomized) {
-					const nameBtn = document.createElement('button')
-					nameBtn.type = 'button'
-					nameBtn.className = 'match'
-					nameBtn.textContent = translate('Match Google name')
-					nameBtn.addEventListener('click', (event) => {
-						event.preventDefault()
-						matchGoogle(col.id, true, false)
-					})
-					actions.appendChild(nameBtn)
+					actions.appendChild(matchButton(translate('Match Google name'), () => matchGoogle(col.id, true, false)))
 				}
 				if (col.colorCustomized) {
-					const colorBtn = document.createElement('button')
-					colorBtn.type = 'button'
-					colorBtn.className = 'match'
-					colorBtn.textContent = translate('Match Google color')
-					colorBtn.addEventListener('click', (event) => {
-						event.preventDefault()
-						matchGoogle(col.id, false, true)
-					})
-					actions.appendChild(colorBtn)
+					actions.appendChild(matchButton(translate('Match Google color'), () => matchGoogle(col.id, false, true)))
 				}
 				if (actions.childNodes.length > 0) {
 					item.appendChild(actions)
@@ -169,6 +153,18 @@ function init() {
 			}
 			list.appendChild(item)
 		})
+	}
+
+	function matchButton(label, onClick) {
+		const button = document.createElement('button')
+		button.type = 'button'
+		button.className = 'match'
+		button.textContent = label
+		button.addEventListener('click', (event) => {
+			event.preventDefault()
+			onClick()
+		})
+		return button
 	}
 
 	async function matchGoogle(id, name, color) {
