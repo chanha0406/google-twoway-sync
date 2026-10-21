@@ -605,20 +605,12 @@ class CalendarSyncService {
 	 * @return array{list<array<string, mixed>>, ?string}
 	 */
 	private function listEvents(SyncContext $ctx, string $calId, ?string $syncToken): array {
-		$items = [];
 		$query = ['maxResults' => 2500];
 		if ($syncToken !== null) {
 			$query['syncToken'] = $syncToken;
 		}
-		$url = GoogleClient::CALENDAR . 'calendars/' . rawurlencode($calId) . '/events';
-		do {
-			$result = $this->google->request($ctx, 'GET', $url, $query);
-			foreach (($result['items'] ?? []) as $item) {
-				$items[] = $item;
-			}
-			$query['pageToken'] = (string)($result['nextPageToken'] ?? '');
-		} while ($query['pageToken'] !== '');
-		return [$items, isset($result['nextSyncToken']) ? (string)$result['nextSyncToken'] : null];
+		[$items, $last] = $this->google->listAll($ctx, GoogleClient::CALENDAR . 'calendars/' . rawurlencode($calId) . '/events', $query, 'items');
+		return [$items, isset($last['nextSyncToken']) ? (string)$last['nextSyncToken'] : null];
 	}
 
 	/**
@@ -635,18 +627,14 @@ class CalendarSyncService {
 			$uid = (string)$master['iCalUID'];
 		}
 		$exceptions = [];
-		$query = ['iCalUID' => $uid, 'maxResults' => 2500];
-		do {
-			$result = $this->google->request($ctx, 'GET', $base, $query);
-			foreach (($result['items'] ?? []) as $item) {
-				if (($item['id'] ?? '') === $gid) {
-					$master = $item;
-				} elseif (($item['recurringEventId'] ?? '') === $gid) {
-					$exceptions[] = $item;
-				}
+		[$items] = $this->google->listAll($ctx, $base, ['iCalUID' => $uid, 'maxResults' => 2500], 'items');
+		foreach ($items as $item) {
+			if (($item['id'] ?? '') === $gid) {
+				$master = $item;
+			} elseif (($item['recurringEventId'] ?? '') === $gid) {
+				$exceptions[] = $item;
 			}
-			$query['pageToken'] = (string)($result['nextPageToken'] ?? '');
-		} while ($query['pageToken'] !== '');
+		}
 		$master ??= $this->getEvent($ctx, $base, $gid);
 		if ($master === null || ($master['status'] ?? '') === 'cancelled') {
 			return self::deletedGroup();

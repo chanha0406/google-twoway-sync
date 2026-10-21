@@ -22,6 +22,27 @@ class GoogleClient {
 	}
 
 	/**
+	 * GET every page of a list endpoint.
+	 *
+	 * @param array<string, scalar|list<scalar>> $query
+	 * @return array{0: list<array<string, mixed>>, 1: array<string, mixed>} the
+	 *   items under $itemsKey and the last page (for nextSyncToken)
+	 */
+	public function listAll(SyncContext $ctx, string $url, array $query, string $itemsKey): array {
+		$items = [];
+		do {
+			$result = $this->request($ctx, 'GET', $url, $query);
+			foreach (($result[$itemsKey] ?? []) as $item) {
+				if (is_array($item)) {
+					$items[] = $item;
+				}
+			}
+			$query['pageToken'] = (string)($result['nextPageToken'] ?? '');
+		} while ($query['pageToken'] !== '');
+		return [$items, $result];
+	}
+
+	/**
 	 * @param array<string, scalar|list<scalar>> $query
 	 * @param array<string, mixed>|null $body
 	 * @return array<string, mixed>

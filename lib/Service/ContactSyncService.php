@@ -612,20 +612,10 @@ class ContactSyncService {
 		if ($syncToken !== null) {
 			$query['syncToken'] = $syncToken;
 		}
-		$people = [];
-		do {
-			$result = $this->google->request($ctx, 'GET', GoogleClient::PEOPLE . 'people/me/connections', $query);
-			foreach (($result['connections'] ?? []) as $person) {
-				$people[] = $person;
-			}
-			$query['pageToken'] = (string)($result['nextPageToken'] ?? '');
-		} while ($query['pageToken'] !== '');
-		return [$people, isset($result['nextSyncToken']) ? (string)$result['nextSyncToken'] : null];
+		[$people, $last] = $this->google->listAll($ctx, GoogleClient::PEOPLE . 'people/me/connections', $query, 'connections');
+		return [$people, isset($last['nextSyncToken']) ? (string)$last['nextSyncToken'] : null];
 	}
 
-	/**
-	 * @return array<string, mixed>
-	 */
 	/**
 	 * People reads for contacts that changed only on the Nextcloud side.
 	 * At most MAX_PERSON_READS are fetched; the rest stay for the next run.
@@ -642,38 +632,39 @@ class ContactSyncService {
 			}
 		}
 		$names = array_slice(array_values($names), 0, self::MAX_PERSON_READS);
+		if ($names === []) {
+			return [];
+		}
 		$out = [];
-		foreach (array_chunk($names, self::MAX_PERSON_READS) as $chunk) {
-			try {
-				$result = $this->google->request($ctx, 'GET', GoogleClient::PEOPLE . 'people:batchGet', [
-					'personFields' => ContactConverter::PERSON_FIELDS,
-					'resourceNames' => $chunk,
-				]);
-			} catch (GoogleApiException $e) {
-				if ($e->isRateLimit()) {
-					break;
-				}
-				throw $e;
+		try {
+			$result = $this->google->request($ctx, 'GET', GoogleClient::PEOPLE . 'people:batchGet', [
+				'personFields' => ContactConverter::PERSON_FIELDS,
+				'resourceNames' => $names,
+			]);
+		} catch (GoogleApiException $e) {
+			if ($e->isRateLimit()) {
+				return [];
 			}
-			foreach (($result['responses'] ?? []) as $row) {
-				if (!is_array($row)) {
-					continue;
-				}
-				$person = $row['person'] ?? null;
-				$rn = (string)($row['requestedResourceName'] ?? (is_array($person) ? ($person['resourceName'] ?? '') : ''));
-				if ($rn === '') {
-					continue;
-				}
-				$status = (int)($row['httpStatusCode'] ?? 200);
-				if ($status === 404 || $status === 410) {
-					$out[$rn] = self::deleted();
-					continue;
-				}
-				if ($status >= 400 || !is_array($person)) {
-					continue;
-				}
-				$out[$rn] = self::entry($person);
+			throw $e;
+		}
+		foreach (($result['responses'] ?? []) as $row) {
+			if (!is_array($row)) {
+				continue;
 			}
+			$person = $row['person'] ?? null;
+			$rn = (string)($row['requestedResourceName'] ?? (is_array($person) ? ($person['resourceName'] ?? '') : ''));
+			if ($rn === '') {
+				continue;
+			}
+			$status = (int)($row['httpStatusCode'] ?? 200);
+			if ($status === 404 || $status === 410) {
+				$out[$rn] = self::deleted();
+				continue;
+			}
+			if ($status >= 400 || !is_array($person)) {
+				continue;
+			}
+			$out[$rn] = self::entry($person);
 		}
 		return $out;
 	}
@@ -692,16 +683,12 @@ class ContactSyncService {
 	 */
 	private function groupNames(SyncContext $ctx): array {
 		$out = [];
-		$query = ['pageSize' => 1000, 'groupFields' => 'name,groupType'];
-		do {
-			$result = $this->google->request($ctx, 'GET', GoogleClient::PEOPLE . 'contactGroups', $query);
-			foreach (($result['contactGroups'] ?? []) as $group) {
-				if (($group['groupType'] ?? '') === 'USER_CONTACT_GROUP') {
-					$out[(string)$group['resourceName']] = (string)($group['formattedName'] ?? $group['name'] ?? '');
-				}
+		[$groups] = $this->google->listAll($ctx, GoogleClient::PEOPLE . 'contactGroups', ['pageSize' => 1000, 'groupFields' => 'name,groupType'], 'contactGroups');
+		foreach ($groups as $group) {
+			if (($group['groupType'] ?? '') === 'USER_CONTACT_GROUP') {
+				$out[(string)$group['resourceName']] = (string)($group['formattedName'] ?? $group['name'] ?? '');
 			}
-			$query['pageToken'] = (string)($result['nextPageToken'] ?? '');
-		} while ($query['pageToken'] !== '');
+		}
 		return $out;
 	}
 

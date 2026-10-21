@@ -348,7 +348,6 @@ class TaskSyncService {
 	 * @return list<array<string, mixed>>
 	 */
 	private function listTasks(SyncContext $ctx, string $listId, ?string $updatedMin): array {
-		$items = [];
 		$query = [
 			'maxResults' => 100,
 			'showCompleted' => 'true',
@@ -358,17 +357,7 @@ class TaskSyncService {
 			$query['updatedMin'] = $updatedMin;
 			$query['showDeleted'] = 'true';
 		}
-		$url = GoogleClient::TASKS . 'lists/' . rawurlencode($listId) . '/tasks';
-		do {
-			$result = $this->google->request($ctx, 'GET', $url, $query);
-			foreach (($result['items'] ?? []) as $item) {
-				if (is_array($item)) {
-					$items[] = $item;
-				}
-			}
-			$query['pageToken'] = (string)($result['nextPageToken'] ?? '');
-		} while ($query['pageToken'] !== '');
-		return $items;
+		return $this->google->listAll($ctx, GoogleClient::TASKS . 'lists/' . rawurlencode($listId) . '/tasks', $query, 'items')[0];
 	}
 
 	/**

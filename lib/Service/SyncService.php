@@ -260,18 +260,18 @@ class SyncService {
 	public function syncUser(string $userId, bool $preview = false, bool $legacy = false, bool $allowMassDelete = false, ?int $collectionId = null): array {
 		T::forUser($userId);
 		try {
-		if (!$preview && !$this->tokens->isConnected($userId)) {
-			throw new AuthException(T::t('Connect a Google account first.'));
-		}
-		$path = Application::APP_ID . '/' . $userId;
-		$this->locking->acquireLock($path, ILockingProvider::LOCK_EXCLUSIVE);
-		try {
-			$ctx = new SyncContext($userId, $preview, $legacy, $allowMassDelete);
-			return $this->syncLocked($ctx, $collectionId);
-		} finally {
-			$this->locking->releaseLock($path, ILockingProvider::LOCK_EXCLUSIVE);
-		}
+			if (!$preview && !$this->tokens->isConnected($userId)) {
+				throw new AuthException(T::t('Connect a Google account first.'));
+			}
+			$path = Application::APP_ID . '/' . $userId;
+			$this->locking->acquireLock($path, ILockingProvider::LOCK_EXCLUSIVE);
+			try {
+				$ctx = new SyncContext($userId, $preview, $legacy, $allowMassDelete);
+				return $this->syncLocked($ctx, $collectionId);
 			} finally {
+				$this->locking->releaseLock($path, ILockingProvider::LOCK_EXCLUSIVE);
+			}
+		} finally {
 			T::forUser(null);
 		}
 	}
@@ -350,16 +350,7 @@ class SyncService {
 	 * @return list<array<string, mixed>>
 	 */
 	private function calendarList(SyncContext $ctx): array {
-		$items = [];
-		$query = ['maxResults' => 250];
-		do {
-			$result = $this->google->request($ctx, 'GET', GoogleClient::CALENDAR . 'users/me/calendarList', $query);
-			foreach (($result['items'] ?? []) as $item) {
-				$items[] = $item;
-			}
-			$query['pageToken'] = (string)($result['nextPageToken'] ?? '');
-		} while ($query['pageToken'] !== '');
-		return $items;
+		return $this->google->listAll($ctx, GoogleClient::CALENDAR . 'users/me/calendarList', ['maxResults' => 250], 'items')[0];
 	}
 
 	private function refreshTaskLists(SyncContext $ctx): void {
@@ -406,18 +397,7 @@ class SyncService {
 	 * @return list<array<string, mixed>>
 	 */
 	private function taskLists(SyncContext $ctx): array {
-		$items = [];
-		$query = ['maxResults' => 100];
-		do {
-			$result = $this->google->request($ctx, 'GET', GoogleClient::TASKS . 'users/@me/lists', $query);
-			foreach (($result['items'] ?? []) as $item) {
-				if (is_array($item)) {
-					$items[] = $item;
-				}
-			}
-			$query['pageToken'] = (string)($result['nextPageToken'] ?? '');
-		} while ($query['pageToken'] !== '');
-		return $items;
+		return $this->google->listAll($ctx, GoogleClient::TASKS . 'users/@me/lists', ['maxResults' => 100], 'items')[0];
 	}
 
 	private function readContext(string $userId): SyncContext {
