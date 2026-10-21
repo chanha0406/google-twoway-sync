@@ -134,10 +134,24 @@ class ContactSyncService {
 			}
 		}
 		if (!$preview && $id !== $col->getNcId()) {
-			$col->setNcId($id);
-			$this->collections->update($col);
+			$this->rebind($col, $id);
 		}
 		return $id;
+	}
+
+	/**
+	 * Point the collection at another address book. States from the old book
+	 * would make every Google contact look deleted locally and push deletes to
+	 * Google, so start over with a full sync like a new calendar does.
+	 */
+	public function rebind(Collection $col, int $id): void {
+		if ($col->getNcId() > 0) {
+			$this->states->deleteByCollection($col->getId());
+			$col->setInitialized(0);
+			$col->setSyncToken(null);
+		}
+		$col->setNcId($id);
+		$this->collections->update($col);
 	}
 
 	public function sync(Collection $col, SyncContext $ctx): SyncReport {

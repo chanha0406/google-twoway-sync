@@ -139,8 +139,7 @@ class SyncService {
 		} else {
 			$abId = $this->contacts->resolveAddressBookId($userId, $contacts->getNcId());
 			if ($abId > 0 && $abId !== $contacts->getNcId()) {
-				$contacts->setNcId($abId);
-				$this->collections->update($contacts);
+				$this->contacts->rebind($contacts, $abId);
 			}
 		}
 		if ($this->tokens->isConnected($userId) && $this->tokens->hasTasksScope($userId)) {
