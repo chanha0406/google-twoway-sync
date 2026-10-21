@@ -13,7 +13,6 @@ use OCA\GoogleTwoWaySync\Db\ObjectState;
 use OCA\GoogleTwoWaySync\Db\ObjectStateMapper;
 use OCA\GoogleTwoWaySync\Exception\GoogleApiException;
 use OCP\BackgroundJob\IJobList;
-use Sabre\DAV\PropPatch;
 use Sabre\VObject\Component\VCalendar;
 use Sabre\VObject\Reader;
 
@@ -36,6 +35,7 @@ class CalendarSyncService {
 		private ObjectStateMapper $states,
 		private CollectionMapper $collections,
 		private IJobList $jobs,
+		private CalendarAppearance $appearance,
 	) {
 	}
 
@@ -501,107 +501,36 @@ class CalendarSyncService {
 	 * @param array<string, mixed>|null $calendar
 	 */
 	public function syncAppearance(Collection $col, ?array $calendar, bool $preview, bool $forceName = false, bool $forceColor = false): void {
-		if ($preview || !is_array($calendar) || self::isInTrash($calendar)) {
+		if ($preview || !is_array($calendar)) {
 			return;
 		}
-		$ncId = (int)$calendar['id'];
-		$ncName = (string)($calendar['{DAV:}displayname'] ?? '');
-		$ncColor = self::normalizeColor($calendar['{http://apple.com/ns/ical/}calendar-color'] ?? null);
-		$desiredName = self::calendarDisplayName($col);
-		$desiredColor = self::normalizeColor($col->getColor());
-		// With nothing applied yet, assume the Google value was. Seeding with
-		// the local value made a local rename look untouched and overwrote it.
-		$seeded = false;
-		if ($col->getAppliedName() === null) {
-			$col->setAppliedName($desiredName);
-			$seeded = true;
-		}
-		if ($col->getAppliedColor() === null) {
-			$col->setAppliedColor($desiredColor !== '' ? $desiredColor : $ncColor);
-			$seeded = true;
-		}
-		if ($seeded) {
-			$this->collections->update($col);
-		}
-		$patch = [];
-		$markers = false;
-		$appliedName = (string)$col->getAppliedName();
-		$appliedColor = self::normalizeColor($col->getAppliedColor());
-
-		if ($forceName || ($ncName === $appliedName && $ncName !== $desiredName)) {
-			$patch['{DAV:}displayname'] = $desiredName;
-			$col->setAppliedName($desiredName);
-			$markers = true;
-		} elseif ($ncName === $desiredName && $appliedName !== $desiredName) {
-			$col->setAppliedName($desiredName);
-			$markers = true;
-		}
-		if ($desiredColor !== '' && ($forceColor || ($ncColor === $appliedColor && $ncColor !== $desiredColor))) {
-			$patch['{http://apple.com/ns/ical/}calendar-color'] = $desiredColor;
-			$col->setAppliedColor($desiredColor);
-			$markers = true;
-		} elseif ($desiredColor !== '' && $ncColor === $desiredColor && $appliedColor !== $desiredColor) {
-			$col->setAppliedColor($desiredColor);
-			$markers = true;
-		}
-
-		if ($patch !== []) {
-			$propPatch = new PropPatch($patch);
-			$this->caldav->updateCalendar($ncId, $propPatch);
-			$propPatch->commit();
-			$this->collections->update($col);
-		} elseif ($markers) {
-			$this->collections->update($col);
-		}
+		$this->appearance->apply($col, $calendar, self::calendarDisplayName($col), self::normalizeColor($col->getColor()), $forceName, $forceColor);
 	}
 
 	/**
 	 * Forces the Nextcloud calendar name and/or color to the stored Google values.
 	 */
 	public function matchGoogle(Collection $col, bool $name, bool $color): void {
-		$ncId = $col->getNcId();
-		if ($ncId <= 0) {
-			throw new \RuntimeException(T::t('This calendar is not linked to Nextcloud yet.'));
-		}
-		$cal = $this->caldav->getCalendarById($ncId);
-		if ($cal === null || self::isInTrash($cal)) {
+		$cal = $this->appearance->linked($col, $col->getNcId());
+		if ($cal === null) {
 			throw new \RuntimeException(T::t('This calendar is not linked to Nextcloud yet.'));
 		}
 		$this->syncAppearance($col, $cal, false, $name, $color);
 	}
 
 	public function syncAppearanceFor(Collection $col): void {
-		$ncId = $col->getNcId();
-		if ($ncId <= 0) {
-			return;
-		}
-		$cal = $this->caldav->getCalendarById($ncId);
-		if ($cal === null || self::isInTrash($cal)) {
-			return;
-		}
-		$this->syncAppearance($col, $cal, false);
+		$this->syncAppearance($col, $this->appearance->linked($col, $col->getNcId()), false);
 	}
 
 	/**
 	 * @return array{nameCustomized: bool, colorCustomized: bool}
 	 */
 	public function appearanceFlags(Collection $col): array {
-		$desiredName = self::calendarDisplayName($col);
-		$desiredColor = self::normalizeColor($col->getColor());
-		$ncId = $col->getNcId();
-		if ($ncId <= 0) {
-			return ['nameCustomized' => false, 'colorCustomized' => false];
-		}
-		$cal = $this->caldav->getCalendarById($ncId);
-		if ($cal === null || self::isInTrash($cal)) {
-			return ['nameCustomized' => false, 'colorCustomized' => false];
-		}
-		$ncName = (string)($cal['{DAV:}displayname'] ?? '');
-		$ncColor = self::normalizeColor($cal['{http://apple.com/ns/ical/}calendar-color'] ?? null);
-		return [
-			'nameCustomized' => $ncName !== $desiredName,
-			'colorCustomized' => $desiredColor !== '' && $ncColor !== $desiredColor,
-		];
+		return $this->appearance->flags(
+			$this->appearance->linked($col, $col->getNcId()),
+			self::calendarDisplayName($col),
+			self::normalizeColor($col->getColor()),
+		);
 	}
 
 	private function resolveCalendar(Collection $col, SyncContext $ctx, SyncReport $report): int {
@@ -665,19 +594,11 @@ class CalendarSyncService {
 	}
 
 	public static function normalizeColor(?string $color): string {
-		$color = strtolower(trim((string)$color));
-		if (preg_match('/^#([0-9a-f]{6})([0-9a-f]{2})?$/', $color, $m) === 1) {
-			return '#' . $m[1];
-		}
-		if (preg_match('/^#([0-9a-f]{3})$/', $color, $m) === 1) {
-			$h = $m[1];
-			return '#' . $h[0] . $h[0] . $h[1] . $h[1] . $h[2] . $h[2];
-		}
-		return $color;
+		return Appearance::normalizeColor($color);
 	}
 
 	private static function isInTrash(array $calendar): bool {
-		return ($calendar['{http://owncloud.org/ns}deleted-at'] ?? null) !== null;
+		return CalendarAppearance::isInTrash($calendar);
 	}
 
 	/**

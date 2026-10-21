@@ -33,6 +33,7 @@ class TaskSyncService {
 		private CalDavBackend $caldav,
 		private ObjectStateMapper $states,
 		private CollectionMapper $collections,
+		private CalendarAppearance $appearance,
 	) {
 	}
 
@@ -392,104 +393,30 @@ class TaskSyncService {
 		if ($preview || !is_array($calendar)) {
 			return;
 		}
-		if (($calendar['{http://owncloud.org/ns}deleted-at'] ?? null) !== null) {
-			return;
-		}
-		$ncId = (int)$calendar['id'];
-		$ncName = (string)($calendar['{DAV:}displayname'] ?? '');
-		$ncColor = CalendarSyncService::normalizeColor($calendar['{http://apple.com/ns/ical/}calendar-color'] ?? null);
-		$desiredName = self::localName((string)$col->getDisplayName());
-		$desiredColor = self::DEFAULT_COLOR;
-		// With nothing applied yet, assume the Google value was. Seeding with
-		// the local value made a local rename look untouched and overwrote it.
-		$seeded = false;
-		if ($col->getAppliedName() === null) {
-			$col->setAppliedName($desiredName);
-			$seeded = true;
-		}
-		if ($col->getAppliedColor() === null) {
-			$col->setAppliedColor($desiredColor);
-			$seeded = true;
-		}
-		if ($seeded) {
-			$this->collections->update($col);
-		}
-		$patch = [];
-		$markers = false;
-		$appliedName = (string)$col->getAppliedName();
-		$appliedColor = CalendarSyncService::normalizeColor($col->getAppliedColor());
-
-		if ($forceName || ($ncName === $appliedName && $ncName !== $desiredName)) {
-			$patch['{DAV:}displayname'] = $desiredName;
-			$col->setAppliedName($desiredName);
-			$markers = true;
-		} elseif ($ncName === $desiredName && $appliedName !== $desiredName) {
-			$col->setAppliedName($desiredName);
-			$markers = true;
-		}
-		if ($forceColor || ($ncColor === $appliedColor && $ncColor !== $desiredColor)) {
-			$patch['{http://apple.com/ns/ical/}calendar-color'] = $desiredColor;
-			$col->setAppliedColor($desiredColor);
-			$markers = true;
-		} elseif ($ncColor === $desiredColor && $appliedColor !== $desiredColor) {
-			$col->setAppliedColor($desiredColor);
-			$markers = true;
-		}
-
-		if ($patch !== []) {
-			$propPatch = new \Sabre\DAV\PropPatch($patch);
-			$this->caldav->updateCalendar($ncId, $propPatch);
-			$propPatch->commit();
-			$this->collections->update($col);
-		} elseif ($markers) {
-			$this->collections->update($col);
-		}
+		$this->appearance->apply($col, $calendar, self::localName((string)$col->getDisplayName()), self::DEFAULT_COLOR, $forceName, $forceColor);
 	}
 
 	public function matchGoogle(Collection $col, bool $name, bool $color): void {
-		$ncId = $this->existingCalendarId($col);
-		if ($ncId <= 0) {
-			throw new \RuntimeException(T::t('This calendar is not linked to Nextcloud yet.'));
-		}
-		$calendar = $this->caldav->getCalendarById($ncId);
-		if (!is_array($calendar)) {
+		$calendar = $this->appearance->linked($col, $this->existingCalendarId($col));
+		if ($calendar === null) {
 			throw new \RuntimeException(T::t('This calendar is not linked to Nextcloud yet.'));
 		}
 		$this->syncAppearance($col, $calendar, false, $name, $color);
 	}
 
 	public function syncAppearanceFor(Collection $col): void {
-		$ncId = $this->existingCalendarId($col);
-		if ($ncId <= 0) {
-			return;
-		}
-		$calendar = $this->caldav->getCalendarById($ncId);
-		if (!is_array($calendar)) {
-			return;
-		}
-		$this->syncAppearance($col, $calendar, false);
+		$this->syncAppearance($col, $this->appearance->linked($col, $this->existingCalendarId($col)), false);
 	}
 
 	/**
 	 * @return array{nameCustomized: bool, colorCustomized: bool}
 	 */
 	public function appearanceFlags(Collection $col): array {
-		$desiredName = self::localName((string)$col->getDisplayName());
-		$desiredColor = self::DEFAULT_COLOR;
-		$ncId = $this->existingCalendarId($col);
-		if ($ncId <= 0) {
-			return ['nameCustomized' => false, 'colorCustomized' => false];
-		}
-		$calendar = $this->caldav->getCalendarById($ncId);
-		if (!is_array($calendar)) {
-			return ['nameCustomized' => false, 'colorCustomized' => false];
-		}
-		$ncName = (string)($calendar['{DAV:}displayname'] ?? '');
-		$ncColor = CalendarSyncService::normalizeColor($calendar['{http://apple.com/ns/ical/}calendar-color'] ?? null);
-		return [
-			'nameCustomized' => $ncName !== $desiredName,
-			'colorCustomized' => $ncColor !== $desiredColor,
-		];
+		return $this->appearance->flags(
+			$this->appearance->linked($col, $this->existingCalendarId($col)),
+			self::localName((string)$col->getDisplayName()),
+			self::DEFAULT_COLOR,
+		);
 	}
 
 	private function ensureCalendar(Collection $col): int {
@@ -528,14 +455,14 @@ class TaskSyncService {
 		if ($existing > 0) {
 			$calendar = $this->caldav->getCalendarById($existing);
 			if (is_array($calendar)
-				&& ($calendar['{http://owncloud.org/ns}deleted-at'] ?? null) === null
+				&& !CalendarAppearance::isInTrash($calendar)
 				&& ($calendar['principaluri'] ?? '') === $principal) {
 				return $existing;
 			}
 		}
 		$uri = 'google-tasks-' . substr($col->getGoogleHash(), 0, 32);
 		$calendar = $this->caldav->getCalendarByUri($principal, $uri);
-		return is_array($calendar) && ($calendar['{http://owncloud.org/ns}deleted-at'] ?? null) === null
+		return is_array($calendar) && !CalendarAppearance::isInTrash($calendar)
 			? (int)$calendar['id']
 			: 0;
 	}
@@ -581,12 +508,12 @@ class TaskSyncService {
 	private function writeTodo(int $ncId, string $uri, array $shape, string $taskId): string {
 		$existing = $this->caldav->getCalendarObject($ncId, $uri);
 		if ($existing === null) {
-			$ics = self::serialize($shape, $taskId !== '' ? $taskId : $uri);
+			$ics = TodoIcs::serialize($shape, $taskId !== '' ? $taskId : $uri);
 			return (string)$this->caldav->createCalendarObject($ncId, $uri, $ics);
 		}
 		$data = $existing['calendardata'] ?? '';
-		$ics = (is_string($data) ? self::merge($data, $shape) : null)
-			?? self::serialize($shape, $taskId !== '' ? $taskId : $uri);
+		$ics = (is_string($data) ? TodoIcs::merge($data, $shape) : null)
+			?? TodoIcs::serialize($shape, $taskId !== '' ? $taskId : $uri);
 		return (string)$this->caldav->updateCalendarObject($ncId, $uri, $ics);
 	}
 
@@ -618,7 +545,7 @@ class TaskSyncService {
 				'title' => trim((string)($component->SUMMARY ?? '')),
 				'notes' => trim((string)($component->DESCRIPTION ?? '')),
 				'status' => ($status === 'COMPLETED' || $percent === '100') ? 'completed' : 'needsAction',
-				'due' => self::dueFromProperty($component->DUE ?? null),
+				'due' => TodoIcs::dueFromProperty($component->DUE ?? null),
 			];
 		}
 		throw new \RuntimeException(T::t('The task has no to-do component.'));
@@ -640,27 +567,6 @@ class TaskSyncService {
 			return str_contains($value, '-');
 		} catch (\Throwable) {
 			return true;
-		}
-	}
-
-	/**
-	 * @param \Sabre\VObject\Property|null $due
-	 */
-	private static function dueFromProperty($due): string {
-		if ($due === null) {
-			return '';
-		}
-		try {
-			return $due->getDateTime()->setTimezone(new \DateTimeZone('UTC'))->format('Y-m-d');
-		} catch (\Throwable) {
-			$raw = trim((string)$due->getValue());
-			if (preg_match('/^(\d{4})-(\d{2})-(\d{2})$/', $raw, $m) === 1) {
-				return $m[1] . '-' . $m[2] . '-' . $m[3];
-			}
-			if (preg_match('/^(\d{4})(\d{2})(\d{2})/', $raw, $m) === 1) {
-				return $m[1] . '-' . $m[2] . '-' . $m[3];
-			}
-			return '';
 		}
 	}
 
@@ -752,113 +658,6 @@ class TaskSyncService {
 			$body['parent'] = $parent;
 		}
 		return $body;
-	}
-
-	/**
-	 * @param array{title: string, notes: string, status: string, due: string} $shape
-	 */
-	private static function serialize(array $shape, string $uid): string {
-		$calendar = new VCalendar();
-		$todo = $calendar->createComponent('VTODO');
-		$todo->UID = 'google-task-' . $uid;
-		$todo->SUMMARY = $shape['title'];
-		if ($shape['notes'] !== '') {
-			$todo->DESCRIPTION = $shape['notes'];
-		}
-		if ($shape['due'] !== '' && preg_match('/^\d{4}-\d{2}-\d{2}$/', $shape['due']) === 1) {
-			$todo->add('DUE', str_replace('-', '', $shape['due']), ['VALUE' => 'DATE']);
-		}
-		$done = $shape['status'] === 'completed';
-		$todo->STATUS = $done ? 'COMPLETED' : 'NEEDS-ACTION';
-		$todo->{'PERCENT-COMPLETE'} = $done ? 100 : 0;
-		if ($done) {
-			$todo->COMPLETED = gmdate('Ymd\THis\Z');
-		}
-		$calendar->add($todo);
-		return $calendar->serialize();
-	}
-
-	/**
-	 * Put Google's fields into the existing VTODO. Google Tasks has only a
-	 * title, notes, status and a due date, so alarms (including iPhone
-	 * location reminders), priority, start date, categories and the UID stay
-	 * as the CalDAV client wrote them. Returns null when there is no VTODO.
-	 *
-	 * @param array{title: string, notes: string, status: string, due: string} $shape
-	 */
-	public static function merge(string $data, array $shape): ?string {
-		try {
-			$calendar = Reader::read($data, Reader::OPTION_FORGIVING);
-		} catch (\Throwable) {
-			return null;
-		}
-		if (!$calendar instanceof VCalendar || !isset($calendar->VTODO)) {
-			return null;
-		}
-		$todo = $calendar->VTODO;
-
-		$todo->SUMMARY = $shape['title'];
-		if ($shape['notes'] !== '') {
-			$todo->DESCRIPTION = $shape['notes'];
-		} else {
-			$todo->remove('DESCRIPTION');
-		}
-
-		// Keep the local DUE (and its time) while Google has the same day.
-		// A DUE written as 2026-10-21 is the old broken format and is rewritten.
-		$due = $todo->DUE ?? null;
-		$sameDay = $due !== null
-			&& !str_contains((string)$due->getValue(), '-')
-			&& self::dueFromProperty($due) === $shape['due'];
-		if (!$sameDay) {
-			$timed = self::shiftedDue($due, $shape['due']);
-			$todo->remove('DUE');
-			if ($timed !== null) {
-				// Keep the time of day so DUE stays the same value type as DTSTART.
-				$todo->add('DUE', $timed);
-			} elseif ($shape['due'] !== '' && preg_match('/^\d{4}-\d{2}-\d{2}$/', $shape['due']) === 1) {
-				$todo->add('DUE', str_replace('-', '', $shape['due']), ['VALUE' => 'DATE']);
-			}
-		}
-
-		$status = strtoupper((string)($todo->STATUS ?? ''));
-		$wasDone = $status === 'COMPLETED' || (string)($todo->{'PERCENT-COMPLETE'} ?? '') === '100';
-		$done = $shape['status'] === 'completed';
-		if ($done !== $wasDone) {
-			$todo->STATUS = $done ? 'COMPLETED' : 'NEEDS-ACTION';
-			$todo->{'PERCENT-COMPLETE'} = $done ? 100 : 0;
-			if ($done) {
-				$todo->COMPLETED = gmdate('Ymd\THis\Z');
-			} else {
-				$todo->remove('COMPLETED');
-			}
-		}
-
-		$now = gmdate('Ymd\THis\Z');
-		$todo->DTSTAMP = $now;
-		$todo->{'LAST-MODIFIED'} = $now;
-		return $calendar->serialize();
-	}
-
-	/**
-	 * A timed local DUE moved by whole days so its UTC date is Google's day.
-	 *
-	 * @param \Sabre\VObject\Property|null $due
-	 */
-	private static function shiftedDue($due, string $day): ?\DateTimeImmutable {
-		if (!$due instanceof \Sabre\VObject\Property\ICalendar\DateTime || !$due->hasTime()
-			|| preg_match('/^\d{4}-\d{2}-\d{2}$/', $day) !== 1) {
-			return null;
-		}
-		try {
-			$local = $due->getDateTime();
-			$from = new \DateTimeImmutable($local->setTimezone(new \DateTimeZone('UTC'))->format('Y-m-d'), new \DateTimeZone('UTC'));
-			$to = new \DateTimeImmutable($day, new \DateTimeZone('UTC'));
-		} catch (\Throwable) {
-			return null;
-		}
-		$days = (int)$from->diff($to)->format('%r%a');
-		return $local->modify(($days >= 0 ? '+' : '') . $days . ' days');
 	}
 
 	private static function uriFor(string $taskId): string {
