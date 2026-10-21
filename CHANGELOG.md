@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.8] - 2026-10-21
+
+### Fixed
+
+- Tasks pulled from Google are merged into the existing VTODO. Alarms (including iPhone location reminders), priority, start date, categories and the UID are kept, and a timed due date keeps its time.
+- The first name and color check no longer overwrites a calendar or task list that was renamed or recolored in Nextcloud before this app tracked the values.
+
 ## [1.0.7] - 2026-10-21
 
 ### Fixed

@@ -505,21 +505,22 @@ class CalendarSyncService {
 		$ncId = (int)$calendar['id'];
 		$ncName = (string)($calendar['{DAV:}displayname'] ?? '');
 		$ncColor = self::normalizeColor($calendar['{http://apple.com/ns/ical/}calendar-color'] ?? null);
+		$desiredName = self::calendarDisplayName($col);
+		$desiredColor = self::normalizeColor($col->getColor());
+		// With nothing applied yet, assume the Google value was. Seeding with
+		// the local value made a local rename look untouched and overwrote it.
 		$seeded = false;
 		if ($col->getAppliedName() === null) {
-			$col->setAppliedName($ncName !== '' ? $ncName : self::calendarDisplayName($col));
+			$col->setAppliedName($desiredName);
 			$seeded = true;
 		}
 		if ($col->getAppliedColor() === null) {
-			$col->setAppliedColor($ncColor !== '' ? $ncColor : self::normalizeColor($col->getColor()));
+			$col->setAppliedColor($desiredColor !== '' ? $desiredColor : $ncColor);
 			$seeded = true;
 		}
 		if ($seeded) {
 			$this->collections->update($col);
 		}
-
-		$desiredName = self::calendarDisplayName($col);
-		$desiredColor = self::normalizeColor($col->getColor());
 		$patch = [];
 		$markers = false;
 		$appliedName = (string)$col->getAppliedName();
