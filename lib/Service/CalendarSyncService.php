@@ -248,7 +248,9 @@ class CalendarSyncService {
 		}
 
 		if (!$ctx->preview) {
-			if (!$pullFailed || ($col->getSyncToken() ?? '') === '') {
+			// A failed pull keeps the old token (or none on the first sync), so
+			// the next run lists those items again instead of skipping them.
+			if (!$pullFailed) {
 				$col->setSyncToken($nextToken);
 			}
 			$col->setInitialized(1);
