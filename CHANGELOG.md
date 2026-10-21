@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.6] - 2026-10-20
+
+### Fixed
+
+- After uploading a task to Google, the local iCalendar object is left as the CalDAV client wrote it. Rewriting it from the Google payload changed the ETag and made iOS Reminders fail later PUTs with 412.
+
 ## [1.0.5] - 2026-10-19
 
 ### Changed

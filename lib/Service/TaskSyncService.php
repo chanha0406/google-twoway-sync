@@ -332,8 +332,9 @@ class TaskSyncService {
 					$task = $this->google->request($ctx, 'PATCH', GoogleClient::TASKS . 'lists/' . rawurlencode($listId) . '/tasks/' . rawurlencode((string)$p['gid']), [], self::body($shape, $parent));
 				}
 				$saved = self::entry($task);
-				$etag = $this->writeTodo($ncId, $uri, $saved['shape'], (string)($task['id'] ?? $p['gid']));
-				$this->saveState($st, $col, (string)($task['id'] ?? $p['gid']), $saved, $uri, $etag);
+				// Keep the local ICS. Rewriting it changed the CalDAV ETag and
+				// iOS Reminders then got 412 on the next PUT.
+				$this->saveState($st, $col, (string)($task['id'] ?? $p['gid']), $saved, $uri, $this->etagOf($ncId, $uri));
 				return;
 		}
 	}
@@ -566,6 +567,11 @@ class TaskSyncService {
 			return (string)$this->caldav->createCalendarObject($ncId, $uri, $ics);
 		}
 		return (string)$this->caldav->updateCalendarObject($ncId, $uri, $ics);
+	}
+
+	private function etagOf(int $ncId, string $uri): string {
+		$object = $this->caldav->getCalendarObject($ncId, $uri);
+		return is_array($object) ? (string)($object['etag'] ?? '') : '';
 	}
 
 	/**
