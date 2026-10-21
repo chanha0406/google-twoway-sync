@@ -82,4 +82,18 @@ class TodoIcsTest extends TestCase {
 		$this->assertSame('2026-10-21', TodoIcs::dueFromProperty($todo->DUE));
 		$this->assertSame('', TodoIcs::dueFromProperty(null));
 	}
+
+	public function testShapeReadsGoogleFields(): void {
+		$this->assertSame(
+			['title' => 'old', 'notes' => 'old notes', 'status' => 'needsAction', 'due' => '2026-10-21'],
+			TodoIcs::shape(self::IOS),
+		);
+		$this->assertNull(TodoIcs::shape('garbage'));
+	}
+
+	public function testNeedsDueRepair(): void {
+		$this->assertFalse(TodoIcs::needsDueRepair(self::IOS));
+		$this->assertTrue(TodoIcs::needsDueRepair(str_replace('DUE;TZID=Asia/Seoul:20261021T180000', 'DUE;VALUE=DATE:2026-10-21', self::IOS)));
+		$this->assertFalse(TodoIcs::needsDueRepair(''));
+	}
 }

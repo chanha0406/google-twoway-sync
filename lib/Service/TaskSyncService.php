@@ -12,8 +12,6 @@ use OCA\GoogleTwoWaySync\Db\CollectionMapper;
 use OCA\GoogleTwoWaySync\Db\ObjectState;
 use OCA\GoogleTwoWaySync\Db\ObjectStateMapper;
 use OCA\GoogleTwoWaySync\Exception\GoogleApiException;
-use Sabre\VObject\Component\VCalendar;
-use Sabre\VObject\Reader;
 
 /**
  * Two-way sync of one Google task list with its own Nextcloud calendar.
@@ -119,59 +117,7 @@ class TaskSyncService {
 		}
 
 		if ($ncId > 0) {
-			$plannedUri = [];
-			foreach ($plan as $p) {
-				if (($p['action'] ?? '') !== 'none') {
-					$plannedUri[(string)$p['uri']] = true;
-				}
-			}
-			foreach ($plan as &$p) {
-				if (($p['action'] ?? '') !== 'none') {
-					continue;
-				}
-				$due = is_array($p['group'] ?? null) ? (string)($p['group']['shape']['due'] ?? '') : '';
-				if ($due === '' || !$this->dueNeedsRepair($ncId, (string)$p['uri'])) {
-					continue;
-				}
-				$p['action'] = SyncReport::PULL_UPDATE;
-				$p['note'] = T::t('Repaired due date format for the calendar');
-				$plannedUri[(string)$p['uri']] = true;
-			}
-			unset($p);
-			foreach ($local as $uri => $obj) {
-				$uri = (string)$uri;
-				if (isset($plannedUri[$uri]) || !$this->dueNeedsRepair($ncId, $uri)) {
-					continue;
-				}
-				$st = $byUri[$uri] ?? null;
-				$gid = $st !== null ? $st->getGoogleId() : '';
-				$g = ($gid !== '' && isset($tasks[$gid])) ? $tasks[$gid] : null;
-				if ($g === null || ($g['shape']['due'] ?? '') === '') {
-					try {
-						$shape = $this->shapeFromUri($ncId, $uri);
-					} catch (\Throwable) {
-						continue;
-					}
-					if ($shape['due'] === '') {
-						continue;
-					}
-					$g = [
-						'deleted' => false,
-						'shape' => $shape,
-						'fp' => $st !== null ? $st->getGoogleFp() : sha1((string)json_encode($shape, JSON_UNESCAPED_UNICODE)),
-						'updated' => 0,
-						'parent' => '',
-					];
-				}
-				$plan[] = [
-					'action' => SyncReport::PULL_UPDATE,
-					'uri' => $uri,
-					'gid' => $gid,
-					'group' => $g,
-					'state' => $st,
-					'note' => T::t('Repaired due date format for the calendar'),
-				];
-			}
+			$plan = $this->planDueRepairs($plan, $local, $byUri, $tasks, $ncId);
 		}
 
 		$plan = array_values(array_filter($plan, static function (array $p) use ($report): bool {
@@ -517,46 +463,79 @@ class TaskSyncService {
 	private function shapeFromUri(int $ncId, string $uri): array {
 		$object = $this->caldav->getCalendarObject($ncId, $uri);
 		$data = is_array($object) ? ($object['calendardata'] ?? '') : '';
-		if (!is_string($data) || $data === '') {
+		$shape = is_string($data) ? TodoIcs::shape($data) : null;
+		if ($shape === null) {
 			throw new \RuntimeException(T::t('Could not read Nextcloud tasks.'));
 		}
-		$vcal = Reader::read($data, Reader::OPTION_FORGIVING);
-		if (!$vcal instanceof VCalendar) {
-			throw new \RuntimeException(T::t('Could not read Nextcloud tasks.'));
-		}
-		foreach ($vcal->getComponents() as $component) {
-			if ($component->name !== 'VTODO') {
-				continue;
-			}
-			$status = strtoupper((string)($component->STATUS ?? ''));
-			$percent = (string)($component->{'PERCENT-COMPLETE'} ?? '');
-			return [
-				'title' => trim((string)($component->SUMMARY ?? '')),
-				'notes' => trim((string)($component->DESCRIPTION ?? '')),
-				'status' => ($status === 'COMPLETED' || $percent === '100') ? 'completed' : 'needsAction',
-				'due' => TodoIcs::dueFromProperty($component->DUE ?? null),
-			];
-		}
-		throw new \RuntimeException(T::t('The task has no to-do component.'));
+		return $shape;
 	}
 
-	private function dueNeedsRepair(int $ncId, string $uri): bool {
-		$object = $this->caldav->getCalendarObject($ncId, $uri);
-		$data = is_array($object) ? ($object['calendardata'] ?? '') : '';
-		if (!is_string($data) || $data === '' || stripos($data, 'DUE') === false) {
-			return false;
-		}
-		try {
-			$vcal = Reader::read($data, Reader::OPTION_FORGIVING);
-			if (!$vcal instanceof VCalendar || !isset($vcal->VTODO->DUE)) {
-				return false;
+	/**
+	 * Tasks whose DUE was written in the old 2026-10-21 form are rewritten so
+	 * the Calendar app shows them. Local data is read once, in batches.
+	 *
+	 * @param list<array<string, mixed>> $plan
+	 * @param array<string, array<string, mixed>> $local
+	 * @param array<string, ObjectState> $byUri
+	 * @param array<string, array<string, mixed>> $tasks
+	 * @return list<array<string, mixed>>
+	 */
+	private function planDueRepairs(array $plan, array $local, array $byUri, array $tasks, int $ncId): array {
+		$planned = [];
+		foreach ($plan as $p) {
+			if (($p['action'] ?? '') !== 'none') {
+				$planned[(string)$p['uri']] = true;
 			}
-			$vcal->VTODO->DUE->getDateTime();
-			$value = (string)$vcal->VTODO->DUE->getValue();
-			return str_contains($value, '-');
-		} catch (\Throwable) {
-			return true;
 		}
+		$data = [];
+		$uris = array_values(array_filter(array_map('strval', array_keys($local)), static fn (string $uri): bool => !isset($planned[$uri])));
+		foreach (array_chunk($uris, 200) as $chunk) {
+			foreach ($this->caldav->getMultipleCalendarObjects($ncId, $chunk) as $obj) {
+				$ics = (string)($obj['calendardata'] ?? '');
+				if (TodoIcs::needsDueRepair($ics)) {
+					$data[(string)$obj['uri']] = $ics;
+				}
+			}
+		}
+		if ($data === []) {
+			return $plan;
+		}
+
+		$note = T::t('Repaired due date format for the calendar');
+		foreach ($plan as &$p) {
+			$uri = (string)$p['uri'];
+			if (($p['action'] ?? '') !== 'none' || !isset($data[$uri])) {
+				continue;
+			}
+			if (is_array($p['group'] ?? null) && (string)($p['group']['shape']['due'] ?? '') !== '') {
+				$p['action'] = SyncReport::PULL_UPDATE;
+				$p['note'] = $note;
+				unset($data[$uri]);
+			}
+		}
+		unset($p);
+
+		foreach ($data as $uri => $ics) {
+			$uri = (string)$uri;
+			$st = $byUri[$uri] ?? null;
+			$gid = $st !== null ? $st->getGoogleId() : '';
+			$g = ($gid !== '' && isset($tasks[$gid])) ? $tasks[$gid] : null;
+			if ($g === null || ($g['shape']['due'] ?? '') === '') {
+				$shape = TodoIcs::shape($ics);
+				if ($shape === null || $shape['due'] === '') {
+					continue;
+				}
+				$g = [
+					'deleted' => false,
+					'shape' => $shape,
+					'fp' => $st !== null ? $st->getGoogleFp() : sha1((string)json_encode($shape, JSON_UNESCAPED_UNICODE)),
+					'updated' => 0,
+					'parent' => '',
+				];
+			}
+			$plan[] = ['action' => SyncReport::PULL_UPDATE, 'uri' => $uri, 'gid' => $gid, 'group' => $g, 'state' => $st, 'note' => $note];
+		}
+		return $plan;
 	}
 
 	/**

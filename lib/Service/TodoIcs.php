@@ -139,4 +139,48 @@ final class TodoIcs {
 		$days = (int)$from->diff($to)->format('%r%a');
 		return $local->modify(($days >= 0 ? '+' : '') . $days . ' days');
 	}
+
+	/**
+	 * Google's four fields read from a VTODO, or null without one.
+	 *
+	 * @return array{title: string, notes: string, status: string, due: string}|null
+	 */
+	public static function shape(string $data): ?array {
+		try {
+			$vcal = Reader::read($data, Reader::OPTION_FORGIVING);
+		} catch (\Throwable) {
+			return null;
+		}
+		if (!$vcal instanceof VCalendar || !isset($vcal->VTODO)) {
+			return null;
+		}
+		$todo = $vcal->VTODO;
+		$status = strtoupper((string)($todo->STATUS ?? ''));
+		$percent = (string)($todo->{'PERCENT-COMPLETE'} ?? '');
+		return [
+			'title' => trim((string)($todo->SUMMARY ?? '')),
+			'notes' => trim((string)($todo->DESCRIPTION ?? '')),
+			'status' => ($status === 'COMPLETED' || $percent === '100') ? 'completed' : 'needsAction',
+			'due' => self::dueFromProperty($todo->DUE ?? null),
+		];
+	}
+
+	/**
+	 * True when DUE uses the old 2026-10-21 form or cannot be parsed.
+	 */
+	public static function needsDueRepair(string $data): bool {
+		if ($data === '' || stripos($data, 'DUE') === false) {
+			return false;
+		}
+		try {
+			$vcal = Reader::read($data, Reader::OPTION_FORGIVING);
+			if (!$vcal instanceof VCalendar || !isset($vcal->VTODO->DUE)) {
+				return false;
+			}
+			$vcal->VTODO->DUE->getDateTime();
+			return str_contains((string)$vcal->VTODO->DUE->getValue(), '-');
+		} catch (\Throwable) {
+			return true;
+		}
+	}
 }
