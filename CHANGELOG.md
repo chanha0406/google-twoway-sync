@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-10-21
+
+### Fixed
+
+- A pull that fails on the first full sync no longer stores the sync token, so the item is fetched again on the next run.
+
+### Changed
+
+- Calendars, contacts and tasks share one sync decision (SyncDecision), one plan runner (PlanRunner) and one name/color logic (Appearance, CalendarAppearance).
+- Google list paging goes through GoogleClient::listAll.
+- The task due-date repair reads local tasks once, in batches.
+- Unit tests in tests/Unit run without a Nextcloud instance (tests/run-unit.sh).
+
 ## [1.0.9] - 2026-10-21
 
 ### Fixed
