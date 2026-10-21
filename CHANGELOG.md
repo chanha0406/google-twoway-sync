@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.9] - 2026-10-21
+
+### Fixed
+
+- The next task sync starts from the time the list was read (minus a minute), not from the end of the run, so a task changed on Google during a sync is no longer skipped.
+
 ## [1.0.8] - 2026-10-21
 
 ### Fixed

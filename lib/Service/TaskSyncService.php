@@ -60,6 +60,10 @@ class TaskSyncService {
 
 		$full = !$initialized || ($col->getSyncToken() ?? '') === '';
 		$tasks = [];
+		// The next updatedMin is taken before listing, so a task changed on
+		// Google while this run is busy is listed again next time. A minute of
+		// slack covers clock skew; tasks this run wrote come back unchanged.
+		$listedAt = time() - 60;
 		foreach ($this->listTasks($ctx, $col->getGoogleId(), $full ? null : $col->getSyncToken()) as $task) {
 			$id = (string)($task['id'] ?? '');
 			if ($id !== '') {
@@ -217,7 +221,7 @@ class TaskSyncService {
 
 		if (!$ctx->preview && $ncId > 0) {
 			if (!$failed) {
-				$col->setSyncToken(gmdate('Y-m-d\TH:i:s\Z', time() - 2));
+				$col->setSyncToken(gmdate('Y-m-d\TH:i:s\Z', $listedAt));
 			}
 			$col->setInitialized(1);
 			$col->setLastSync(time());
