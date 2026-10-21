@@ -36,6 +36,7 @@ class CalendarSyncService {
 		private CollectionMapper $collections,
 		private IJobList $jobs,
 		private CalendarAppearance $appearance,
+		private PlanRunner $runner,
 	) {
 	}
 
@@ -202,62 +203,20 @@ class CalendarSyncService {
 			$plan[] = ['action' => $writable ? SyncReport::PUSH_CREATE : SyncReport::PULL_DELETE, 'uri' => $uri, 'gid' => '', 'group' => null, 'state' => null, 'note' => $writable ? '' : T::t('Deleted because the calendar is read-only')];
 		}
 
-		$plan = array_values(array_filter($plan, static function (array $p) use ($report): bool {
-			if ($p['action'] === 'none') {
-				$report->unchanged++;
-				return false;
-			}
-			return true;
-		}));
-
-		$deletions = count(array_filter($plan, static fn (array $p) => in_array($p['action'], [SyncReport::PULL_DELETE, SyncReport::PUSH_DELETE], true)));
-		$blockDeletes = !$ctx->allowMassDelete && SyncReport::tooManyDeletions($deletions, max(count($states), count($local)));
-		if ($blockDeletes) {
-			$report->error(T::t('Refused to delete %s items at once. Check them, then continue with occ googletwowaysync:sync --allow-mass-delete.', [$deletions]));
-		}
-
-		$contents = $this->loadContents($ncId, $plan);
-		$pullFailed = false;
-		$pushBlocked = false;
-		foreach ($plan as $p) {
-			$action = $p['action'];
-			if ($blockDeletes && in_array($action, [SyncReport::PULL_DELETE, SyncReport::PUSH_DELETE], true)) {
-				$pullFailed = true;
-				continue;
-			}
-			$isPush = in_array($action, [SyncReport::PUSH_CREATE, SyncReport::PUSH_UPDATE, SyncReport::PUSH_DELETE], true);
-			if ($isPush && $pushBlocked) {
-				continue;
-			}
-			try {
-				$this->execute($p, $col, $ncId, $tz, $defaults, $local, $contents, $ctx, $report);
-			} catch (GoogleApiException $e) {
-				$report->error($this->label($p, $contents) . ': ' . $e->getMessage());
-				if ($e->isRateLimit()) {
-					$pushBlocked = true;
-				}
-				if (!$isPush) {
-					$pullFailed = true;
-				}
-			} catch (\Throwable $e) {
-				$report->error($this->label($p, $contents) . ': ' . $e->getMessage());
-				if (!$isPush) {
-					$pullFailed = true;
-				}
-			}
-		}
-
+		$contents = $this->loadContents($ncId, array_values(array_filter($plan, static fn (array $p): bool => $p['action'] !== 'none')));
+		$ok = $this->runner->run(
+			$plan,
+			$ctx,
+			$report,
+			max(count($states), count($local)),
+			static fn (int $n): string => T::t('Refused to delete %s items at once. Check them, then continue with occ googletwowaysync:sync --allow-mass-delete.', [$n]),
+			fn (array $p) => $this->execute($p, $col, $ncId, $tz, $defaults, $local, $contents, $ctx, $report),
+			fn (array $p): string => $this->label($p, $contents),
+		);
 		if (!$ctx->preview) {
 			// A failed pull keeps the old token (or none on the first sync), so
 			// the next run lists those items again instead of skipping them.
-			if (!$pullFailed) {
-				$col->setSyncToken($nextToken);
-			}
-			$col->setInitialized(1);
-			$col->setLastSync(time());
-			$col->setLastSummary($report->summary());
-			$col->setLastError($report->errors === [] ? null : implode("\n", array_slice($report->errors, 0, 20)));
-			$this->collections->update($col);
+			$this->runner->finish($col, $report, $ok, $nextToken);
 		}
 		return $report;
 	}

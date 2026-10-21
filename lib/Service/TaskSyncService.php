@@ -32,6 +32,7 @@ class TaskSyncService {
 		private ObjectStateMapper $states,
 		private CollectionMapper $collections,
 		private CalendarAppearance $appearance,
+		private PlanRunner $runner,
 	) {
 	}
 
@@ -120,61 +121,20 @@ class TaskSyncService {
 			$plan = $this->planDueRepairs($plan, $local, $byUri, $tasks, $ncId);
 		}
 
-		$plan = array_values(array_filter($plan, static function (array $p) use ($report): bool {
-			if ($p['action'] === 'none') {
-				$report->unchanged++;
-				return false;
-			}
-			return true;
-		}));
-		$deletions = count(array_filter($plan, static fn (array $p) => in_array($p['action'], [SyncReport::PULL_DELETE, SyncReport::PUSH_DELETE], true)));
-		$blockDeletes = !$ctx->allowMassDelete && SyncReport::tooManyDeletions($deletions, max(count($states), count($local)));
-		if ($blockDeletes) {
-			$report->error(T::t('Refused to delete %s tasks at once. Check them, then continue with occ googletwowaysync:sync --allow-mass-delete.', [$deletions]));
-		}
-
-		$failed = false;
-		$pushBlocked = false;
-		foreach ($plan as $p) {
-			$action = $p['action'];
-			if ($blockDeletes && in_array($action, [SyncReport::PULL_DELETE, SyncReport::PUSH_DELETE], true)) {
-				$failed = true;
-				continue;
-			}
-			$isPush = in_array($action, [SyncReport::PUSH_CREATE, SyncReport::PUSH_UPDATE, SyncReport::PUSH_DELETE], true);
-			if ($isPush && ($pushBlocked || $this->writes >= self::MAX_WRITES_PER_RUN)) {
-				if (!$pushBlocked && !$ctx->preview) {
-					$pushBlocked = true;
-					$report->error(T::t('The per-run write limit (%s) was reached. The rest waits for the next sync.', [self::MAX_WRITES_PER_RUN]));
-				}
-				if (!$ctx->preview) {
-					$failed = true;
-					continue;
-				}
-			}
-			try {
-				$this->execute($p, $col, $ncId, $ctx, $report);
-			} catch (GoogleApiException $e) {
-				$report->error($this->label($p) . ': ' . $e->getMessage());
-				$failed = true;
-				if ($e->isRateLimit()) {
-					$pushBlocked = true;
-				}
-			} catch (\Throwable $e) {
-				$report->error($this->label($p) . ': ' . $e->getMessage());
-				$failed = true;
-			}
-		}
-
+		$ok = $this->runner->run(
+			$plan,
+			$ctx,
+			$report,
+			max(count($states), count($local)),
+			static fn (int $n): string => T::t('Refused to delete %s tasks at once. Check them, then continue with occ googletwowaysync:sync --allow-mass-delete.', [$n]),
+			fn (array $p) => $this->execute($p, $col, $ncId, $ctx, $report),
+			fn (array $p): string => $this->label($p),
+			fn (): int => $this->writes,
+			self::MAX_WRITES_PER_RUN,
+			true,
+		);
 		if (!$ctx->preview && $ncId > 0) {
-			if (!$failed) {
-				$col->setSyncToken(gmdate('Y-m-d\TH:i:s\Z', $listedAt));
-			}
-			$col->setInitialized(1);
-			$col->setLastSync(time());
-			$col->setLastSummary($report->summary());
-			$col->setLastError($report->errors === [] ? null : implode("\n", array_slice($report->errors, 0, 20)));
-			$this->collections->update($col);
+			$this->runner->finish($col, $report, $ok, gmdate('Y-m-d\TH:i:s\Z', $listedAt));
 		}
 		return $report;
 	}

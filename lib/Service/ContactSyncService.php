@@ -49,6 +49,7 @@ class ContactSyncService {
 		private ObjectStateMapper $states,
 		private CollectionMapper $collections,
 		private IJobList $jobs,
+		private PlanRunner $runner,
 	) {
 	}
 
@@ -272,66 +273,21 @@ class ContactSyncService {
 			}
 		}
 
-		$plan = array_values(array_filter($plan, static function (array $p) use ($report): bool {
-			if ($p['action'] === 'none') {
-				$report->unchanged++;
-				return false;
-			}
-			return true;
-		}));
-		$deletions = count(array_filter($plan, static fn (array $p) => in_array($p['action'], [SyncReport::PULL_DELETE, SyncReport::PUSH_DELETE], true)));
-		$blockDeletes = !$ctx->allowMassDelete && SyncReport::tooManyDeletions($deletions, max(count($states), count($cards)));
-		if ($blockDeletes) {
-			$report->error(T::t('Refused to delete %s contacts at once. Check them, then continue with occ googletwowaysync:sync --allow-mass-delete.', [$deletions]));
-		}
-
-		$pullFailed = false;
-		$pushBlocked = false;
-		foreach ($plan as $p) {
-			$action = $p['action'];
-			if ($blockDeletes && in_array($action, [SyncReport::PULL_DELETE, SyncReport::PUSH_DELETE], true)) {
-				$pullFailed = true;
-				continue;
-			}
-			$isPush = in_array($action, [SyncReport::PUSH_CREATE, SyncReport::PUSH_UPDATE, SyncReport::PUSH_DELETE], true);
-			if ($isPush && ($pushBlocked || $this->writes >= self::MAX_WRITES_PER_RUN)) {
-				if (!$pushBlocked && !$ctx->preview) {
-					$pushBlocked = true;
-					$report->error(T::t('The per-run write limit (%s) was reached. The rest waits for the next sync.', [self::MAX_WRITES_PER_RUN]));
-				}
-				if (!$ctx->preview) {
-					continue;
-				}
-			}
-			try {
-				$this->execute($p, $col, $abId, $groupNames, $cards, $ctx, $report);
-			} catch (GoogleApiException $e) {
-				$report->error($this->label($p, $cards) . ': ' . $e->getMessage());
-				if ($e->isRateLimit()) {
-					$pushBlocked = true;
-				}
-				if (!$isPush) {
-					$pullFailed = true;
-				}
-			} catch (\Throwable $e) {
-				$report->error($this->label($p, $cards) . ': ' . $e->getMessage());
-				if (!$isPush) {
-					$pullFailed = true;
-				}
-			}
-		}
-
+		$ok = $this->runner->run(
+			$plan,
+			$ctx,
+			$report,
+			max(count($states), count($cards)),
+			static fn (int $n): string => T::t('Refused to delete %s contacts at once. Check them, then continue with occ googletwowaysync:sync --allow-mass-delete.', [$n]),
+			fn (array $p) => $this->execute($p, $col, $abId, $groupNames, $cards, $ctx, $report),
+			fn (array $p): string => $this->label($p, $cards),
+			fn (): int => $this->writes,
+			self::MAX_WRITES_PER_RUN,
+		);
 		if (!$ctx->preview) {
 			// A failed pull keeps the old token (or none on the first sync), so
 			// the next run lists those items again instead of skipping them.
-			if (!$pullFailed) {
-				$col->setSyncToken($nextToken);
-			}
-			$col->setInitialized(1);
-			$col->setLastSync(time());
-			$col->setLastSummary($report->summary());
-			$col->setLastError($report->errors === [] ? null : implode("\n", array_slice($report->errors, 0, 20)));
-			$this->collections->update($col);
+			$this->runner->finish($col, $report, $ok, $nextToken);
 		}
 		return $report;
 	}
