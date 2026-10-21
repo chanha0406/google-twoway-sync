@@ -185,34 +185,15 @@ class TaskSyncService {
 	 * @return array<string, mixed>
 	 */
 	private function decide(ObjectState $st, array $g, ?array $obj): array {
-		$p = ['uri' => $st->getNcUri(), 'gid' => $st->getGoogleId(), 'group' => $g, 'state' => $st, 'note' => ''];
-		$googleChanged = $g['deleted'] || $g['fp'] !== $st->getGoogleFp();
-		$localChanged = $obj !== null && $obj['etag'] !== $st->getNcEtag();
-		if ($obj === null) {
-			if ($g['deleted']) {
-				return ['action' => 'forget'] + $p;
-			}
-			return $googleChanged
-				? ['action' => SyncReport::PULL_CREATE, 'note' => T::t('Restored because Google changed it')] + $p
-				: ['action' => SyncReport::PUSH_DELETE] + $p;
-		}
-		if ($g['deleted']) {
-			return $localChanged
-				? ['action' => SyncReport::PUSH_CREATE, 'note' => T::t('Uploaded again because Nextcloud changed it after Google deleted it')] + $p
-				: ['action' => SyncReport::PULL_DELETE] + $p;
-		}
-		if ($googleChanged && $localChanged) {
-			return $g['updated'] >= (int)$obj['lastmodified']
-				? ['action' => SyncReport::PULL_UPDATE, 'note' => T::t('Both sides changed; Google is newer')] + $p
-				: ['action' => SyncReport::PUSH_UPDATE, 'note' => T::t('Both sides changed; Nextcloud is newer')] + $p;
-		}
-		if ($googleChanged) {
-			return ['action' => SyncReport::PULL_UPDATE] + $p;
-		}
-		if ($localChanged) {
-			return ['action' => SyncReport::PUSH_UPDATE] + $p;
-		}
-		return ['action' => 'none'] + $p;
+		$d = SyncDecision::decide(
+			$obj !== null,
+			$g['deleted'],
+			$g['deleted'] || $g['fp'] !== $st->getGoogleFp(),
+			$obj !== null && $obj['etag'] !== $st->getNcEtag(),
+			(int)$g['updated'],
+			(int)($obj['lastmodified'] ?? 0),
+		);
+		return ['action' => $d['action'], 'uri' => $st->getNcUri(), 'gid' => $st->getGoogleId(), 'group' => $g, 'state' => $st, 'note' => $d['note'] !== '' ? T::t($d['note']) : ''];
 	}
 
 	/**

@@ -268,39 +268,17 @@ class CalendarSyncService {
 	 * @return array<string, mixed>
 	 */
 	private function decide(ObjectState $st, array $g, ?array $obj, bool $googleChanged, bool $writable): array {
-		$p = ['uri' => $st->getNcUri(), 'gid' => $st->getGoogleId(), 'group' => $g, 'state' => $st, 'note' => ''];
-		$eventWritable = $writable && !($g['readonly'] ?? false);
-		$localChanged = $obj !== null && $obj['etag'] !== $st->getNcEtag();
-		if ($obj === null) {
-			if ($g['deleted']) {
-				return $p + ['action' => 'forget'];
-			}
-			if ($googleChanged || !$eventWritable) {
-				return ['action' => SyncReport::PULL_CREATE, 'note' => $googleChanged ? T::t('Restored because Google changed it') : T::t('Restored because the calendar is read-only')] + $p;
-			}
-			return ['action' => SyncReport::PUSH_DELETE] + $p;
-		}
-		if ($g['deleted']) {
-			if ($localChanged && $writable) {
-				return ['action' => SyncReport::PUSH_CREATE, 'note' => T::t('Uploaded again because Nextcloud changed it after Google deleted it')] + $p;
-			}
-			return ['action' => SyncReport::PULL_DELETE] + $p;
-		}
-		if ($googleChanged && $localChanged) {
-			if (!$eventWritable || $g['updated'] >= (int)$obj['lastmodified']) {
-				return ['action' => SyncReport::PULL_UPDATE, 'note' => T::t('Both sides changed; Google is newer')] + $p;
-			}
-			return ['action' => SyncReport::PUSH_UPDATE, 'note' => T::t('Both sides changed; Nextcloud is newer')] + $p;
-		}
-		if ($googleChanged) {
-			return ['action' => SyncReport::PULL_UPDATE] + $p;
-		}
-		if ($localChanged) {
-			return $eventWritable
-				? ['action' => SyncReport::PUSH_UPDATE] + $p
-				: ['action' => SyncReport::PULL_UPDATE, 'note' => T::t('Reverted because the calendar is read-only')] + $p;
-		}
-		return ['action' => 'none'] + $p;
+		$d = SyncDecision::decide(
+			$obj !== null,
+			$g['deleted'],
+			$googleChanged,
+			$obj !== null && $obj['etag'] !== $st->getNcEtag(),
+			(int)$g['updated'],
+			(int)($obj['lastmodified'] ?? 0),
+			$writable,
+			$writable && !($g['readonly'] ?? false),
+		);
+		return ['action' => $d['action'], 'uri' => $st->getNcUri(), 'gid' => $st->getGoogleId(), 'group' => $g, 'state' => $st, 'note' => $d['note'] !== '' ? T::t($d['note']) : ''];
 	}
 
 	/**
