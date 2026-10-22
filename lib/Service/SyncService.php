@@ -257,7 +257,7 @@ class SyncService {
 	/**
 	 * @return array{reports: list<array<string, mixed>>, requests: int, preview: bool}
 	 */
-	public function syncUser(string $userId, bool $preview = false, bool $legacy = false, bool $allowMassDelete = false, ?int $collectionId = null): array {
+	public function syncUser(string $userId, bool $preview = false, bool $legacy = false, bool $allowMassDelete = false, ?int $collectionId = null, bool $forcePhotos = false): array {
 		T::forUser($userId);
 		try {
 			if (!$preview && !$this->tokens->isConnected($userId)) {
@@ -266,7 +266,7 @@ class SyncService {
 			$path = Application::APP_ID . '/' . $userId;
 			$this->locking->acquireLock($path, ILockingProvider::LOCK_EXCLUSIVE);
 			try {
-				$ctx = new SyncContext($userId, $preview, $legacy, $allowMassDelete);
+				$ctx = new SyncContext($userId, $preview, $legacy, $allowMassDelete, $forcePhotos);
 				return $this->syncLocked($ctx, $collectionId);
 			} finally {
 				$this->locking->releaseLock($path, ILockingProvider::LOCK_EXCLUSIVE);

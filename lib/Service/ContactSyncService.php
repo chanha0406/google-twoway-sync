@@ -36,6 +36,7 @@ class ContactSyncService {
 	private const BATCH_GET_SIZE = 200;
 
 	private int $writes = 0;
+	private bool $forcePhotos = false;
 
 	public function __construct(
 		private GoogleClient $google,
@@ -153,6 +154,7 @@ class ContactSyncService {
 	public function sync(Collection $col, SyncContext $ctx): SyncReport {
 		$report = new SyncReport($col->getDisplayName());
 		$this->writes = 0;
+		$this->forcePhotos = $ctx->forcePhotos;
 		$abId = $this->ensureAddressBook($col, $ctx->preview);
 		$ab = $this->carddav->getAddressBookById($abId);
 		if ($ab === null || ($ab['principaluri'] ?? '') !== 'principals/users/' . $col->getUserId()) {
@@ -232,7 +234,7 @@ class ContactSyncService {
 				$plan[] = $this->decide($st, self::deleted(), $card);
 				continue;
 			}
-			if ($card !== null && self::sameEtag((string)$card['etag'], $st->getNcEtag()) && !$this->photoNeverPushed($st, null, $card) && !$this->photoRetry($st)) {
+			if ($card !== null && self::sameEtag((string)$card['etag'], $st->getNcEtag()) && !$this->photoNeverPushed($st, null, $card) && !$this->photoRetry($st) && !$this->forcePending($st, $card)) {
 				$report->unchanged++;
 				continue;
 			}
@@ -339,6 +341,9 @@ class ContactSyncService {
 	 * @param array<string, mixed> $card
 	 */
 	private function photoLocallyChanged(ObjectState $st, array $card, bool $deep): bool {
+		if ($this->forcePending($st, $card)) {
+			return true;
+		}
 		$extra = json_decode((string)$st->getExtra(), true);
 		if (!is_array($extra) || !array_key_exists('nc', $extra)) {
 			return false;
@@ -459,7 +464,7 @@ class ContactSyncService {
 					// Nextcloud's photo is newer than Google's, so it goes up instead of being replaced
 					$sent = $this->pushPhoto($ctx, (string)$p['gid'], $card, $report);
 					if ($sent !== null) {
-						$this->saveState($st, $col, (string)$p['gid'], self::entry($sent), $uri, $etag, $this->converter->photoUrl($sent), $card);
+						$this->saveState($st, $col, (string)$p['gid'], self::entry($sent), $uri, $etag, $this->converter->photoUrl($sent), $card, false, $this->forcePhotos);
 					} else {
 						$this->saveState($st, $col, (string)$p['gid'], $g, $uri, $etag, $oldPhoto, null, true);
 					}
@@ -530,7 +535,7 @@ class ContactSyncService {
 				if ($sent !== null) {
 					$updated = $sent;
 				}
-				$this->saveState($st, $col, (string)$p['gid'], self::entry($updated), $uri, (string)$cards[$uri]['etag'], $this->converter->photoUrl($updated), $photoUp && $sent === null ? null : $card, $photoUp && $sent === null);
+				$this->saveState($st, $col, (string)$p['gid'], self::entry($updated), $uri, (string)$cards[$uri]['etag'], $this->converter->photoUrl($updated), $photoUp && $sent === null ? null : $card, $photoUp && $sent === null, $this->forcePhotos && $sent !== null);
 				return;
 
 			case SyncReport::PUSH_CREATE:
@@ -551,9 +556,25 @@ class ContactSyncService {
 				$photoUp = $this->converter->photoBytes($card) !== null;
 				$sent = $photoUp ? $this->pushPhoto($ctx, (string)$created['resourceName'], $card, $report) : null;
 				$created = $sent ?? $created;
-				$this->saveState($st, $col, (string)$created['resourceName'], self::entry($created), $uri, (string)$cards[$uri]['etag'], $this->converter->photoUrl($created), $photoUp && $sent === null ? null : $card, $photoUp && $sent === null);
+				$this->saveState($st, $col, (string)$created['resourceName'], self::entry($created), $uri, (string)$cards[$uri]['etag'], $this->converter->photoUrl($created), $photoUp && $sent === null ? null : $card, $photoUp && $sent === null, $this->forcePhotos && $sent !== null);
 				return;
 		}
+	}
+
+	/**
+	 * With --force-photos: the card has a photo that was not yet uploaded by a forced run.
+	 * The hash is recorded after a successful upload, so a run cut short by the rate limit
+	 * continues where it stopped.
+	 *
+	 * @param array<string, mixed> $card
+	 */
+	private function forcePending(ObjectState $st, array $card): bool {
+		if (!$this->forcePhotos) {
+			return false;
+		}
+		$vcard = $this->readCard($card['carddata'] ?? null);
+		$hash = $vcard !== null ? $this->photoHash($vcard) : null;
+		return $hash !== null && (json_decode((string)$st->getExtra(), true)['forced'] ?? null) !== $hash;
 	}
 
 	private function photoHash(VCard $card): ?string {
@@ -569,6 +590,9 @@ class ContactSyncService {
 	 */
 	private function photoUpNeeded(ObjectState $st, VCard $card, array $person): bool {
 		$hash = $this->photoHash($card);
+		if ($this->forcePhotos && $hash !== null && (json_decode((string)$st->getExtra(), true)['forced'] ?? null) !== $hash) {
+			return true;
+		}
 		$old = json_decode((string)$st->getExtra(), true)['nc'] ?? false;
 		if ($old === false) {
 			return $hash !== null && $this->converter->photoUrl($person) === null;
@@ -615,7 +639,7 @@ class ContactSyncService {
 	/**
 	 * @param array<string, mixed> $g
 	 */
-	private function saveState(?ObjectState $st, Collection $col, string $rn, array $g, string $uri, string $etag, ?string $photo, ?VCard $card = null, bool $photoRetry = false): void {
+	private function saveState(?ObjectState $st, Collection $col, string $rn, array $g, string $uri, string $etag, ?string $photo, ?VCard $card = null, bool $photoRetry = false, bool $forced = false): void {
 		$st ??= new ObjectState();
 		$st->setCollectionId($col->getId());
 		$st->setGoogleId($rn);
@@ -630,6 +654,11 @@ class ContactSyncService {
 			$extra['nc'] = $this->photoHash($card);
 		} elseif (($old = json_decode((string)$st->getExtra(), true)['nc'] ?? false) !== false) {
 			$extra['nc'] = $old;
+		}
+		if ($forced && $card !== null) {
+			$extra['forced'] = $this->photoHash($card);
+		} elseif (($oldForced = json_decode((string)$st->getExtra(), true)['forced'] ?? null) !== null) {
+			$extra['forced'] = $oldForced;
 		}
 		if ($photoRetry) {
 			$extra['retry'] = true;

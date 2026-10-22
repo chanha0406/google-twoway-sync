@@ -30,6 +30,7 @@ class Sync extends Command {
 			->addOption('legacy-token', null, InputOption::VALUE_NONE, T::t('Use the Google Synchronization read-only token for the preview'))
 			->addOption('collection', 'c', InputOption::VALUE_REQUIRED, T::t('Only this item id (even if it is off)'))
 			->addOption('allow-mass-delete', null, InputOption::VALUE_NONE, T::t('Allow deleting many items at once'))
+			->addOption('force-photos', null, InputOption::VALUE_NONE, T::t('Upload every Nextcloud contact photo to Google once, even where it looks synced'))
 			->addOption('details', 'd', InputOption::VALUE_NONE, T::t('Print every item'));
 	}
 
@@ -53,6 +54,7 @@ class Sync extends Command {
 				$legacy,
 				(bool)$input->getOption('allow-mass-delete'),
 				$collection !== null ? (int)$collection : null,
+				(bool)$input->getOption('force-photos'),
 			);
 		} catch (\Throwable $e) {
 			$output->writeln('<error>' . $e->getMessage() . '</error>');

@@ -25,6 +25,7 @@
 		"Show what would change without writing anything": "아무것도 쓰지 않고 할 일만 보여줌",
 		"Use the Google Synchronization read-only token for the preview": "미리보기에 Google Synchronization의 읽기 전용 토큰을 씀",
 		"Only this item id (even if it is off)": "이 항목 id만 (꺼져 있어도)",
+		"Upload every Nextcloud contact photo to Google once, even where it looks synced": "Nextcloud 연락처 사진을 이미 동기화된 것처럼 보여도 한 번 모두 구글에 올립니다",
 		"Allow deleting many items at once": "한 번에 많이 지우는 것을 허용",
 		"Print every item": "항목별 내용을 모두 출력",
 		"--legacy-token can only be used together with --preview.": "--legacy-token은 --preview와 함께만 씁니다.",

@@ -19,6 +19,8 @@ class SyncContext {
 		/** Use the read-only token of Google Synchronization, previews only */
 		public readonly bool $legacy = false,
 		public readonly bool $allowMassDelete = false,
+		/** Upload every Nextcloud contact photo to Google once, even where it looks synced */
+		public readonly bool $forcePhotos = false,
 	) {
 		if ($legacy && !$preview) {
 			throw new \InvalidArgumentException(T::t('The legacy app token can only be used for previews.'));
