@@ -30,8 +30,8 @@ class ContactSyncService {
 	public const LEGACY_JOB = 'OCA\Google\BackgroundJob\ImportContactsJob';
 	public const LEGACY_PREFIX = 'google_contact_';
 	private const IGNORE = 'ignore';
-	/** People API allows about 60 writes per minute and user */
-	private const MAX_WRITES_PER_RUN = 40;
+	/** People API allows about 60 writes per minute and user; past that the run stops at the rate limit and the rest waits */
+	private const MAX_WRITES_PER_RUN = 200;
 	/** people:batchGet takes at most 200 resource names per request */
 	private const BATCH_GET_SIZE = 200;
 
