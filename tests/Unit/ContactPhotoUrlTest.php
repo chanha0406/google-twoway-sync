@@ -9,8 +9,8 @@ use PHPUnit\Framework\TestCase;
 
 class ContactPhotoUrlTest extends TestCase {
 	public function testThumbnailSizeIsRaised(): void {
-		$this->assertSame('https://lh3.googleusercontent.com/contacts/AB=s1024', ContactConverter::fullSizePhotoUrl('https://lh3.googleusercontent.com/contacts/AB=s100'));
-		$this->assertSame('https://x/y=s1024', ContactConverter::fullSizePhotoUrl('https://x/y=s100-c'));
+		$this->assertSame('https://lh3.googleusercontent.com/contacts/AB=s0', ContactConverter::fullSizePhotoUrl('https://lh3.googleusercontent.com/contacts/AB=s100'));
+		$this->assertSame('https://x/y=s0', ContactConverter::fullSizePhotoUrl('https://x/y=s100-c'));
 	}
 
 	public function testUrlWithoutSizeStaysAsIs(): void {

@@ -137,10 +137,10 @@ class ContactConverter {
 	}
 
 	/**
-	 * Google hands out contact photos as =s100 thumbnails; ask for a large one.
+	 * Google hands out contact photos as =s100 thumbnails; ask for the original size (=s0).
 	 */
 	public static function fullSizePhotoUrl(string $url): string {
-		return preg_replace('/=s\d+(-[A-Za-z0-9-]+)?$/', '=s1024', $url) ?? $url;
+		return preg_replace('/=s\d+(-[A-Za-z0-9-]+)?$/', '=s0', $url) ?? $url;
 	}
 
 	// vCard → comparable

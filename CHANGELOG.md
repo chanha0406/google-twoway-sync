@@ -10,7 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [1.1.1] - 2026-10-22
 
 ### Fixed
-- Contact photos were saved as the 100px thumbnail Google lists. They are now downloaded at 1024px, and cards whose stored photo URL differs are pulled again.
+- Contact photos were saved as the 100px thumbnail Google lists. They are now downloaded at the original size (=s0), and cards whose stored photo URL differs are pulled again.
 
 ## [1.1.0] - 2026-10-21
 
