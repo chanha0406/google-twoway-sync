@@ -237,7 +237,7 @@ class ContactSyncService {
 				$plan[] = $this->decide($st, self::deleted(), $card);
 				continue;
 			}
-			if ($card !== null && self::sameEtag((string)$card['etag'], $st->getNcEtag())) {
+			if ($card !== null && self::sameEtag((string)$card['etag'], $st->getNcEtag()) && !$this->photoNeverPushed($st, null, $card)) {
 				$report->unchanged++;
 				continue;
 			}
@@ -302,11 +302,26 @@ class ContactSyncService {
 			$card !== null,
 			$g['deleted'],
 			$g['deleted'] || $g['fp'] !== $st->getGoogleFp() || $this->photoStale($st, $g),
-			$card !== null && !self::sameEtag((string)$card['etag'], $st->getNcEtag()),
+			$card !== null && (!self::sameEtag((string)$card['etag'], $st->getNcEtag()) || $this->photoNeverPushed($st, $g, $card)),
 			(int)$g['updated'],
 			(int)($card['lastmodified'] ?? 0),
 		);
 		return ['action' => $d['action'], 'uri' => $st->getNcUri(), 'gid' => $st->getGoogleId(), 'group' => $g, 'state' => $st, 'note' => $d['note'] !== '' ? T::t($d['note']) : ''];
+	}
+
+	/**
+	 * A photo added in Nextcloud before photos were uploaded left no trace in the card etag,
+	 * so a state without a recorded photo hash counts as changed when only Nextcloud has one.
+	 *
+	 * @param array<string, mixed>|null $g the Google side when it is already fetched
+	 * @param array<string, mixed> $card
+	 */
+	private function photoNeverPushed(ObjectState $st, ?array $g, array $card): bool {
+		$extra = json_decode((string)$st->getExtra(), true);
+		if (!is_array($extra) || array_key_exists('nc', $extra) || !str_contains((string)($card['carddata'] ?? ''), 'PHOTO')) {
+			return false;
+		}
+		return $g === null ? ($extra['photo'] ?? null) === null : ($g['person'] !== null && $this->converter->photoUrl($g['person']) === null);
 	}
 
 	/**
