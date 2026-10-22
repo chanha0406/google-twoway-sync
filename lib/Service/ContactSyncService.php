@@ -372,7 +372,7 @@ class ContactSyncService {
 					$this->applyPhoto($card, $photo);
 				}
 				$etag = (string)$this->carddav->createCard($abId, $uri, $card->serialize());
-				$this->saveState($st, $col, (string)$p['gid'], $g, $uri, $etag, $photo);
+				$this->saveState($st, $col, (string)$p['gid'], $g, $uri, $etag, $photo, $card);
 				return;
 
 			case SyncReport::ADOPT:
@@ -410,7 +410,8 @@ class ContactSyncService {
 					}
 					$etag = (string)$this->carddav->updateCard($abId, $uri, $card->serialize());
 				}
-				$this->saveState($st, $col, (string)$p['gid'], $g, $uri, $etag, $photo);
+				// An adopted card keeps whatever photo it had, so the first push does not replace Google's
+				$this->saveState($st, $col, (string)$p['gid'], $g, $uri, $etag, $photo, $action === SyncReport::ADOPT && $photo !== null ? null : $card);
 				return;
 
 			case SyncReport::PULL_DELETE:
@@ -448,25 +449,33 @@ class ContactSyncService {
 				}
 				$localC = $this->converter->fromVCard($card);
 				$fields = $this->converter->diff($this->converter->fromGoogle($person, $groupNames), $localC, ContactConverter::FIELDS);
-				if ($fields === []) {
+				$photoUp = $this->photoUpNeeded($st, $card, $person);
+				if ($fields === [] && !$photoUp) {
 					$report->unchanged++;
 					if (!$ctx->preview) {
-						$this->saveState($st, $col, (string)$p['gid'], $g, $uri, (string)$cards[$uri]['etag'], $this->converter->photoUrl($person));
+						$this->saveState($st, $col, (string)$p['gid'], $g, $uri, (string)$cards[$uri]['etag'], $this->converter->photoUrl($person), $card);
 					}
 					return;
 				}
-				$report->add($action, $this->personLabel($person), trim($note . ' ' . implode(',', $fields)));
+				$report->add($action, $this->personLabel($person), trim($note . ' ' . implode(',', $fields) . ($photoUp ? ' ' . T::t('photo') : '')));
 				if ($ctx->preview) {
 					return;
 				}
-				[$body, $update] = $this->converter->toGoogle($localC, $fields);
-				$body['etag'] = $person['etag'] ?? '';
-				$this->writes++;
-				$updated = $this->google->request($ctx, 'PATCH', GoogleClient::PEOPLE . $p['gid'] . ':updateContact', [
-					'updatePersonFields' => implode(',', $update),
-					'personFields' => ContactConverter::PERSON_FIELDS,
-				], $body);
-				$this->saveState($st, $col, (string)$p['gid'], self::entry($updated), $uri, (string)$cards[$uri]['etag'], $this->converter->photoUrl($updated));
+				$updated = $person;
+				if ($fields !== []) {
+					[$body, $update] = $this->converter->toGoogle($localC, $fields);
+					$body['etag'] = $person['etag'] ?? '';
+					$this->writes++;
+					$updated = $this->google->request($ctx, 'PATCH', GoogleClient::PEOPLE . $p['gid'] . ':updateContact', [
+						'updatePersonFields' => implode(',', $update),
+						'personFields' => ContactConverter::PERSON_FIELDS,
+					], $body);
+				}
+				$sent = $photoUp ? $this->pushPhoto($ctx, (string)$p['gid'], $card, $report) : null;
+				if ($sent !== null) {
+					$updated = $sent;
+				}
+				$this->saveState($st, $col, (string)$p['gid'], self::entry($updated), $uri, (string)$cards[$uri]['etag'], $this->converter->photoUrl($updated), $photoUp && $sent === null ? null : $card);
 				return;
 
 			case SyncReport::PUSH_CREATE:
@@ -484,9 +493,59 @@ class ContactSyncService {
 				$created = $this->google->request($ctx, 'POST', GoogleClient::PEOPLE . 'people:createContact', [
 					'personFields' => ContactConverter::PERSON_FIELDS,
 				], $body);
-				$this->saveState($st, $col, (string)$created['resourceName'], self::entry($created), $uri, (string)$cards[$uri]['etag'], $this->converter->photoUrl($created));
+				$photoUp = $this->converter->photoBytes($card) !== null;
+				$sent = $photoUp ? $this->pushPhoto($ctx, (string)$created['resourceName'], $card, $report) : null;
+				$created = $sent ?? $created;
+				$this->saveState($st, $col, (string)$created['resourceName'], self::entry($created), $uri, (string)$cards[$uri]['etag'], $this->converter->photoUrl($created), $photoUp && $sent === null ? null : $card);
 				return;
 		}
+	}
+
+	private function photoHash(VCard $card): ?string {
+		$bytes = $this->converter->photoBytes($card);
+		return $bytes === null ? null : sha1($bytes);
+	}
+
+	/**
+	 * Whether the card's photo differs from the one last synced. A state without a
+	 * recorded photo only uploads when Google has none, so existing contacts keep theirs.
+	 *
+	 * @param array<string, mixed> $person
+	 */
+	private function photoUpNeeded(ObjectState $st, VCard $card, array $person): bool {
+		$hash = $this->photoHash($card);
+		$old = json_decode((string)$st->getExtra(), true)['nc'] ?? false;
+		if ($old === false) {
+			return $hash !== null && $this->converter->photoUrl($person) === null;
+		}
+		return $old !== $hash;
+	}
+
+	/**
+	 * Upload (or remove) the card's photo on Google. Returns the person Google answered with,
+	 * or null when it failed, which leaves the stored hash alone so the next sync tries again.
+	 *
+	 * @return array<string, mixed>|null
+	 */
+	private function pushPhoto(SyncContext $ctx, string $gid, VCard $card, SyncReport $report): ?array {
+		$bytes = $this->converter->photoBytes($card);
+		$this->writes++;
+		try {
+			if ($bytes === null) {
+				$out = $this->google->request($ctx, 'DELETE', GoogleClient::PEOPLE . $gid . ':deleteContactPhoto', [
+					'personFields' => ContactConverter::PERSON_FIELDS,
+				]);
+			} else {
+				$out = $this->google->request($ctx, 'POST', GoogleClient::PEOPLE . $gid . ':updateContactPhoto', [], [
+					'photoBytes' => base64_encode($bytes),
+					'personFields' => ContactConverter::PERSON_FIELDS,
+				]);
+			}
+		} catch (GoogleApiException $e) {
+			$report->error(T::t('Could not upload the photo of a contact: %s', [$e->getMessage()]));
+			return null;
+		}
+		return $out['person'] ?? null;
 	}
 
 	private function applyPhoto(VCard $card, string $url): void {
@@ -501,7 +560,7 @@ class ContactSyncService {
 	/**
 	 * @param array<string, mixed> $g
 	 */
-	private function saveState(?ObjectState $st, Collection $col, string $rn, array $g, string $uri, string $etag, ?string $photo): void {
+	private function saveState(?ObjectState $st, Collection $col, string $rn, array $g, string $uri, string $etag, ?string $photo, ?VCard $card = null): void {
 		$st ??= new ObjectState();
 		$st->setCollectionId($col->getId());
 		$st->setGoogleId($rn);
@@ -511,7 +570,13 @@ class ContactSyncService {
 		$st->setNcUri($uri);
 		$st->setNcEtag(self::canonicalEtag($etag));
 		$st->setIgnored(0);
-		$st->setExtra(json_encode(['photo' => $photo]) ?: null);
+		$extra = ['photo' => $photo];
+		if ($card !== null) {
+			$extra['nc'] = $this->photoHash($card);
+		} elseif (($old = json_decode((string)$st->getExtra(), true)['nc'] ?? false) !== false) {
+			$extra['nc'] = $old;
+		}
+		$st->setExtra(json_encode($extra) ?: null);
 		$st->setLastSync(time());
 		if ($st->getId() === null) {
 			$this->states->insert($st);

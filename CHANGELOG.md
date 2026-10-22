@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.1.2] - 2026-10-22
+
+### Fixed
+- A photo added or changed on a Nextcloud contact is now uploaded to Google (`updateContactPhoto`), and removing it deletes the Google photo. Contacts that already had a Google photo before this version keep it until their Nextcloud photo changes.
+
 ## [1.1.1] - 2026-10-22
 
 ### Fixed

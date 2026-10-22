@@ -528,6 +528,23 @@ class ContactConverter {
 		}
 	}
 
+	/**
+	 * The raw image bytes of a card's PHOTO, or null without one (a plain URL is not uploaded).
+	 */
+	public function photoBytes(VCard $card): ?string {
+		$prop = $card->PHOTO ?? null;
+		if ($prop === null) {
+			return null;
+		}
+		$value = (string)$prop->getValue();
+		if (preg_match('#^data:[^;,]*;base64,(.*)$#is', $value, $m) === 1) {
+			$value = (string)base64_decode($m[1], true);
+		} elseif (preg_match('#^[a-z][a-z0-9+.-]*://#i', $value) === 1) {
+			return null;
+		}
+		return $value === '' ? null : $value;
+	}
+
 	public function setPhoto(VCard $card, ?string $data, string $contentType): void {
 		unset($card->PHOTO);
 		if ($data === null || $data === '') {

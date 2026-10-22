@@ -62,6 +62,7 @@ OC.L10N.register(
 	"The task has no to-do component.": "할 일 구성요소가 없습니다.",
 	"Preview mode does not write to Google.": "미리보기에서는 구글에 쓰지 않습니다.",
 	"Could not download the photo": "사진을 받지 못했습니다",
+	"Could not upload the photo of a contact: %s": "연락처 사진을 올리지 못했습니다: %s",
 	"Google contacts": "구글 연락처",
 	"Could not load task lists. Enable the Tasks API in Google Cloud and connect Google again.": "할 일 목록을 가져오지 못했습니다. Google Cloud에서 Tasks API를 켜고 구글 연결을 다시 누르세요.",
 	"Connect a Google account first.": "구글 계정을 먼저 연결하세요.",
