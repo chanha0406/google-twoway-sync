@@ -92,6 +92,7 @@
 		"Refused to delete %s items at once. Check them, then continue with occ googletwowaysync:sync --allow-mass-delete.": "한 번에 지울 항목이 %s건이라 삭제를 보류했습니다. 확인 후 occ googletwowaysync:sync --allow-mass-delete 로 진행하세요.",
 		"The per-run write limit (%s) was reached. The rest waits for the next sync.": "한 번에 올릴 수 있는 수(%s)를 넘어 나머지는 다음 동기화로 미룹니다.",
 		"The per-minute Google read limit was reached, so %s contacts wait for the next sync.": "구글 읽기 한도(분당) 때문에 연락처 %s건은 다음 동기화로 넘깁니다.",
+		"Google did not return %s contacts, so they wait for the next sync.": "구글이 연락처 %s건을 돌려주지 않아 다음 동기화로 넘깁니다.",
 		"Google API error %1$s: %2$s": "구글 API 오류 %1$s: %2$s",
 		"Allow write access to calendar, contacts, and tasks. Missing: %s": "캘린더·연락처·할 일 쓰기 권한을 모두 허용해야 합니다. 빠진 권한: %s",
 		"Google token request failed: %1$s %2$s": "구글 토큰 요청 실패: %1$s %2$s",

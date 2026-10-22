@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.1.3] - 2026-10-22
+
+### Fixed
+- A contact photo changed in Nextcloud is no longer replaced by Google's older photo. When both sides changed, or the photo upload failed earlier, the Nextcloud photo is kept and uploaded again.
+- Contacts changed only in Nextcloud are read from Google with `people:batchGet` in batches of 200 instead of the first 40. Only a real rate limit (429) defers the rest, and the message now says which case it was.
+
 ## [1.1.2] - 2026-10-22
 
 ### Fixed

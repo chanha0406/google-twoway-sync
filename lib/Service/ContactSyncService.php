@@ -32,13 +32,8 @@ class ContactSyncService {
 	private const IGNORE = 'ignore';
 	/** People API allows about 60 writes per minute and user */
 	private const MAX_WRITES_PER_RUN = 40;
-	/**
-	 * Critical contact reads are 90 per minute per user. connections.list is
-	 * one read per page, but people.get is one read per person, and each
-	 * create or update also spends a critical read. A backlog of local etag
-	 * changes is finished over later cron runs.
-	 */
-	private const MAX_PERSON_READS = 40;
+	/** people:batchGet takes at most 200 resource names per request */
+	private const BATCH_GET_SIZE = 200;
 
 	private int $writes = 0;
 
@@ -237,14 +232,15 @@ class ContactSyncService {
 				$plan[] = $this->decide($st, self::deleted(), $card);
 				continue;
 			}
-			if ($card !== null && self::sameEtag((string)$card['etag'], $st->getNcEtag()) && !$this->photoNeverPushed($st, null, $card)) {
+			if ($card !== null && self::sameEtag((string)$card['etag'], $st->getNcEtag()) && !$this->photoNeverPushed($st, null, $card) && !$this->photoRetry($st)) {
 				$report->unchanged++;
 				continue;
 			}
 			$pending[] = [$st, $card];
 		}
 		if ($pending !== []) {
-			$fetched = $this->fetchPeople($ctx, array_map(static fn (array $row): string => $row[0]->getGoogleId(), $pending));
+			$limited = false;
+			$fetched = $this->fetchPeople($ctx, array_map(static fn (array $row): string => $row[0]->getGoogleId(), $pending), $limited);
 			$deferred = 0;
 			foreach ($pending as [$st, $card]) {
 				$gid = $st->getGoogleId();
@@ -255,7 +251,9 @@ class ContactSyncService {
 				$plan[] = $this->decide($st, $fetched[$gid], $card);
 			}
 			if ($deferred > 0) {
-				$report->error(T::t('The per-minute Google read limit was reached, so %s contacts wait for the next sync.', [$deferred]));
+				$report->error($limited
+					? T::t('The per-minute Google read limit was reached, so %s contacts wait for the next sync.', [$deferred])
+					: T::t('Google did not return %s contacts, so they wait for the next sync.', [$deferred]));
 			}
 		}
 		foreach ($cards as $uri => $card) {
@@ -298,11 +296,15 @@ class ContactSyncService {
 	 * @return array<string, mixed>
 	 */
 	private function decide(ObjectState $st, array $g, ?array $card): array {
+		$googleSide = $g['deleted'] || $g['fp'] !== $st->getGoogleFp();
+		$stale = $this->photoStale($st, $g);
+		// The card's photo is newer than the one last synced: Google's photo must not replace it
+		$photoLocal = $card !== null && $this->photoLocallyChanged($st, $card, $googleSide || $stale);
 		$d = SyncDecision::decide(
 			$card !== null,
 			$g['deleted'],
-			$g['deleted'] || $g['fp'] !== $st->getGoogleFp() || $this->photoStale($st, $g),
-			$card !== null && (!self::sameEtag((string)$card['etag'], $st->getNcEtag()) || $this->photoNeverPushed($st, $g, $card)),
+			$googleSide || ($stale && !$photoLocal),
+			$card !== null && ($photoLocal || !self::sameEtag((string)$card['etag'], $st->getNcEtag()) || $this->photoNeverPushed($st, $g, $card)),
 			(int)$g['updated'],
 			(int)($card['lastmodified'] ?? 0),
 		);
@@ -322,6 +324,33 @@ class ContactSyncService {
 			return false;
 		}
 		return $g === null ? ($extra['photo'] ?? null) === null : ($g['person'] !== null && $this->converter->photoUrl($g['person']) === null);
+	}
+
+	private function photoRetry(ObjectState $st): bool {
+		$extra = json_decode((string)$st->getExtra(), true);
+		return is_array($extra) && !empty($extra['retry']);
+	}
+
+	/**
+	 * Whether the card's photo is not the one last synced with Google: it was changed in
+	 * Nextcloud, or its upload failed. Parsing the card is only done when $deep, that is
+	 * when Google also looks changed, because that is when the answer decides who wins.
+	 *
+	 * @param array<string, mixed> $card
+	 */
+	private function photoLocallyChanged(ObjectState $st, array $card, bool $deep): bool {
+		$extra = json_decode((string)$st->getExtra(), true);
+		if (!is_array($extra) || !array_key_exists('nc', $extra)) {
+			return false;
+		}
+		if (!empty($extra['retry'])) {
+			return true;
+		}
+		if (!$deep) {
+			return false;
+		}
+		$vcard = $this->readCard($card['carddata'] ?? null);
+		return $vcard !== null && $this->photoHash($vcard) !== $extra['nc'];
 	}
 
 	/**
@@ -402,7 +431,8 @@ class ContactSyncService {
 				$photo = $this->converter->photoUrl($person);
 				$oldPhoto = $st !== null ? (json_decode((string)$st->getExtra(), true)['photo'] ?? null) : null;
 				// Adopted cards keep the photo the legacy import downloaded
-				$photoChanged = $action === SyncReport::PULL_UPDATE && $photo !== $oldPhoto;
+				$keepPhoto = $action === SyncReport::PULL_UPDATE && $st !== null && $this->photoLocallyChanged($st, $cards[$uri], true);
+				$photoChanged = $action === SyncReport::PULL_UPDATE && !$keepPhoto && $photo !== $oldPhoto;
 				if ($action === SyncReport::ADOPT) {
 					$report->add($action, $this->personLabel($person), $fields === [] ? '' : T::t('Nextcloud content updated: %s', [implode(',', $fields)]));
 				} elseif ($fields === [] && !$photoChanged) {
@@ -424,6 +454,16 @@ class ContactSyncService {
 						}
 					}
 					$etag = (string)$this->carddav->updateCard($abId, $uri, $card->serialize());
+				}
+				if ($keepPhoto) {
+					// Nextcloud's photo is newer than Google's, so it goes up instead of being replaced
+					$sent = $this->pushPhoto($ctx, (string)$p['gid'], $card, $report);
+					if ($sent !== null) {
+						$this->saveState($st, $col, (string)$p['gid'], self::entry($sent), $uri, $etag, $this->converter->photoUrl($sent), $card);
+					} else {
+						$this->saveState($st, $col, (string)$p['gid'], $g, $uri, $etag, $oldPhoto, null, true);
+					}
+					return;
 				}
 				// An adopted card keeps whatever photo it had, so the first push does not replace Google's
 				$this->saveState($st, $col, (string)$p['gid'], $g, $uri, $etag, $photo, $action === SyncReport::ADOPT && $photo !== null ? null : $card);
@@ -490,7 +530,7 @@ class ContactSyncService {
 				if ($sent !== null) {
 					$updated = $sent;
 				}
-				$this->saveState($st, $col, (string)$p['gid'], self::entry($updated), $uri, (string)$cards[$uri]['etag'], $this->converter->photoUrl($updated), $photoUp && $sent === null ? null : $card);
+				$this->saveState($st, $col, (string)$p['gid'], self::entry($updated), $uri, (string)$cards[$uri]['etag'], $this->converter->photoUrl($updated), $photoUp && $sent === null ? null : $card, $photoUp && $sent === null);
 				return;
 
 			case SyncReport::PUSH_CREATE:
@@ -511,7 +551,7 @@ class ContactSyncService {
 				$photoUp = $this->converter->photoBytes($card) !== null;
 				$sent = $photoUp ? $this->pushPhoto($ctx, (string)$created['resourceName'], $card, $report) : null;
 				$created = $sent ?? $created;
-				$this->saveState($st, $col, (string)$created['resourceName'], self::entry($created), $uri, (string)$cards[$uri]['etag'], $this->converter->photoUrl($created), $photoUp && $sent === null ? null : $card);
+				$this->saveState($st, $col, (string)$created['resourceName'], self::entry($created), $uri, (string)$cards[$uri]['etag'], $this->converter->photoUrl($created), $photoUp && $sent === null ? null : $card, $photoUp && $sent === null);
 				return;
 		}
 	}
@@ -575,7 +615,7 @@ class ContactSyncService {
 	/**
 	 * @param array<string, mixed> $g
 	 */
-	private function saveState(?ObjectState $st, Collection $col, string $rn, array $g, string $uri, string $etag, ?string $photo, ?VCard $card = null): void {
+	private function saveState(?ObjectState $st, Collection $col, string $rn, array $g, string $uri, string $etag, ?string $photo, ?VCard $card = null, bool $photoRetry = false): void {
 		$st ??= new ObjectState();
 		$st->setCollectionId($col->getId());
 		$st->setGoogleId($rn);
@@ -590,6 +630,9 @@ class ContactSyncService {
 			$extra['nc'] = $this->photoHash($card);
 		} elseif (($old = json_decode((string)$st->getExtra(), true)['nc'] ?? false) !== false) {
 			$extra['nc'] = $old;
+		}
+		if ($photoRetry) {
+			$extra['retry'] = true;
 		}
 		$st->setExtra(json_encode($extra) ?: null);
 		$st->setLastSync(time());
@@ -647,36 +690,46 @@ class ContactSyncService {
 	}
 
 	/**
-	 * People reads for contacts that changed only on the Nextcloud side.
-	 * At most MAX_PERSON_READS are fetched; the rest stay for the next run.
+	 * People reads for contacts that changed only on the Nextcloud side, in
+	 * batches of BATCH_GET_SIZE. On a rate limit the batches already read are
+	 * kept and $limited is set; the rest stay for the next run.
 	 * A missing entry means the person was not fetched, not that it was deleted.
 	 *
 	 * @param list<string> $resourceNames
 	 * @return array<string, array<string, mixed>>
 	 */
-	private function fetchPeople(SyncContext $ctx, array $resourceNames): array {
+	private function fetchPeople(SyncContext $ctx, array $resourceNames, bool &$limited): array {
 		$names = [];
 		foreach ($resourceNames as $rn) {
 			if ($rn !== '') {
 				$names[$rn] = $rn;
 			}
 		}
-		$names = array_slice(array_values($names), 0, self::MAX_PERSON_READS);
-		if ($names === []) {
-			return [];
-		}
 		$out = [];
-		try {
-			$result = $this->google->request($ctx, 'GET', GoogleClient::PEOPLE . 'people:batchGet', [
-				'personFields' => ContactConverter::PERSON_FIELDS,
-				'resourceNames' => $names,
-			]);
-		} catch (GoogleApiException $e) {
-			if ($e->isRateLimit()) {
-				return [];
+		foreach (array_chunk(array_values($names), self::BATCH_GET_SIZE) as $chunk) {
+			try {
+				$result = $this->google->request($ctx, 'GET', GoogleClient::PEOPLE . 'people:batchGet', [
+					'personFields' => ContactConverter::PERSON_FIELDS,
+					'resourceNames' => $chunk,
+				]);
+			} catch (GoogleApiException $e) {
+				if ($e->isRateLimit()) {
+					$limited = true;
+					break;
+				}
+				throw $e;
 			}
-			throw $e;
+			$out += $this->parseBatch($result);
 		}
+		return $out;
+	}
+
+	/**
+	 * @param array<string, mixed> $result
+	 * @return array<string, array<string, mixed>>
+	 */
+	private function parseBatch(array $result): array {
+		$out = [];
 		foreach (($result['responses'] ?? []) as $row) {
 			if (!is_array($row)) {
 				continue;
