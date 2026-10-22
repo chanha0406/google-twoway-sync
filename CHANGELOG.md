@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.1.4] - 2026-10-22
+
+### Added
+- `occ googletwowaysync:sync --force-photos` uploads every Nextcloud contact photo to Google once, even where the photo looks synced. A run cut short by the rate limit continues where it stopped.
+
+### Changed
+- The per-run write limit for contacts is 200 instead of 40.
+
 ## [1.1.3] - 2026-10-22
 
 ### Fixed
