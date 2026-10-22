@@ -551,7 +551,7 @@ class ContactSyncService {
 					'personFields' => ContactConverter::PERSON_FIELDS,
 				]);
 			} else {
-				$out = $this->google->request($ctx, 'POST', GoogleClient::PEOPLE . $gid . ':updateContactPhoto', [], [
+				$out = $this->google->request($ctx, 'PATCH', GoogleClient::PEOPLE . $gid . ':updateContactPhoto', [], [
 					'photoBytes' => base64_encode($bytes),
 					'personFields' => ContactConverter::PERSON_FIELDS,
 				]);
