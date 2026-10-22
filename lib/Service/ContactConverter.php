@@ -130,10 +130,17 @@ class ContactConverter {
 		foreach (($p['photos'] ?? []) as $photo) {
 			if (is_array($photo) && empty($photo['default']) && isset($photo['url'])
 				&& ($photo['metadata']['source']['type'] ?? 'CONTACT') === 'CONTACT') {
-				return (string)$photo['url'];
+				return self::fullSizePhotoUrl((string)$photo['url']);
 			}
 		}
 		return null;
+	}
+
+	/**
+	 * Google hands out contact photos as =s100 thumbnails; ask for a large one.
+	 */
+	public static function fullSizePhotoUrl(string $url): string {
+		return preg_replace('/=s\d+(-[A-Za-z0-9-]+)?$/', '=s1024', $url) ?? $url;
 	}
 
 	// vCard → comparable

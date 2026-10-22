@@ -301,12 +301,25 @@ class ContactSyncService {
 		$d = SyncDecision::decide(
 			$card !== null,
 			$g['deleted'],
-			$g['deleted'] || $g['fp'] !== $st->getGoogleFp(),
+			$g['deleted'] || $g['fp'] !== $st->getGoogleFp() || $this->photoStale($st, $g),
 			$card !== null && !self::sameEtag((string)$card['etag'], $st->getNcEtag()),
 			(int)$g['updated'],
 			(int)($card['lastmodified'] ?? 0),
 		);
 		return ['action' => $d['action'], 'uri' => $st->getNcUri(), 'gid' => $st->getGoogleId(), 'group' => $g, 'state' => $st, 'note' => $d['note'] !== '' ? T::t($d['note']) : ''];
+	}
+
+	/**
+	 * A card whose photo came from another URL (an old thumbnail) is pulled again.
+	 *
+	 * @param array<string, mixed> $g
+	 */
+	private function photoStale(ObjectState $st, array $g): bool {
+		if ($g['person'] === null) {
+			return false;
+		}
+		$old = json_decode((string)$st->getExtra(), true)['photo'] ?? null;
+		return $this->converter->photoUrl($g['person']) !== $old;
 	}
 
 	/**
