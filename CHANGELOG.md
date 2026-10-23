@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [11.1.6] - 2026-10-23
+
+### Fixed
+
+- Before the first sync of a calendar finishes, local events that are not linked to Google are left in place. Contacts and tasks already waited. The first run was copying them to Google, or deleting them when the calendar is read-only.
+
 ## [11.1.5] - 2026-10-23
 
 ### Fixed

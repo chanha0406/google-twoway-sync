@@ -197,7 +197,7 @@ class CalendarSyncService {
 		}
 		foreach ($local as $uri => $obj) {
 			$uri = (string)$uri;
-			if (isset($processed[$uri]) || isset($byUri[$uri])) {
+			if (isset($processed[$uri]) || isset($byUri[$uri]) || !$initialized) {
 				continue;
 			}
 			$plan[] = ['action' => $writable ? SyncReport::PUSH_CREATE : SyncReport::PULL_DELETE, 'uri' => $uri, 'gid' => '', 'group' => null, 'state' => null, 'note' => $writable ? '' : T::t('Deleted because the calendar is read-only')];
