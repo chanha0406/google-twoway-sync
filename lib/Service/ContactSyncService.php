@@ -234,7 +234,7 @@ class ContactSyncService {
 				$plan[] = $this->decide($st, self::deleted(), $card);
 				continue;
 			}
-			if ($card !== null && self::sameEtag((string)$card['etag'], $st->getNcEtag()) && !$this->photoNeverPushed($st, null, $card) && !$this->photoRetry($st) && !$this->forcePending($st, $card)) {
+			if ($card !== null && self::sameEtag((string)$card['etag'], $st->getNcEtag()) && !$this->photoNeverPushed($st, null, $card) && !$this->photoRetry($st) && !$this->forcePending($st, $card) && !$this->storedPhotoStale($st)) {
 				$report->unchanged++;
 				continue;
 			}
@@ -363,6 +363,16 @@ class ContactSyncService {
 	 *
 	 * @param array<string, mixed> $g
 	 */
+	/**
+	 * The URL saved last time is still a Google thumbnail, so the person has to
+	 * be read again. The People sync token does not list a contact just because
+	 * this app rewrites =s100 to =s0.
+	 */
+	private function storedPhotoStale(ObjectState $st): bool {
+		$old = json_decode((string)$st->getExtra(), true)['photo'] ?? null;
+		return is_string($old) && $old !== '' && ContactConverter::fullSizePhotoUrl($old) !== $old;
+	}
+
 	private function photoStale(ObjectState $st, array $g): bool {
 		if ($g['person'] === null) {
 			return false;
@@ -417,11 +427,9 @@ class ContactSyncService {
 				$c = $this->converter->fromGoogle($person, $groupNames);
 				$this->converter->applyToVCard($card, $c, array_merge(ContactConverter::FIELDS, ContactConverter::PULL_ONLY), $this->converter->displayName($person));
 				$photo = $this->converter->photoUrl($person);
-				if ($photo !== null) {
-					$this->applyPhoto($card, $photo);
-				}
+				$photoFailed = $photo !== null && !$this->applyPhoto($card, $photo);
 				$etag = (string)$this->carddav->createCard($abId, $uri, $card->serialize());
-				$this->saveState($st, $col, (string)$p['gid'], $g, $uri, $etag, $photo, $card);
+				$this->saveState($st, $col, (string)$p['gid'], $g, $uri, $etag, $photoFailed ? null : $photo, $card, $photoFailed);
 				return;
 
 			case SyncReport::ADOPT:
@@ -449,16 +457,19 @@ class ContactSyncService {
 					return;
 				}
 				$etag = (string)$cards[$uri]['etag'];
+				$photoFailed = false;
 				if ($fields !== [] || $photoChanged) {
 					$this->converter->applyToVCard($card, $google, $fields, $this->converter->displayName($person));
 					if ($photoChanged) {
 						if ($photo !== null) {
-							$this->applyPhoto($card, $photo);
+							$photoFailed = !$this->applyPhoto($card, $photo);
 						} else {
 							$this->converter->setPhoto($card, null, '');
 						}
 					}
-					$etag = (string)$this->carddav->updateCard($abId, $uri, $card->serialize());
+					if ($fields !== [] || !$photoFailed) {
+						$etag = (string)$this->carddav->updateCard($abId, $uri, $card->serialize());
+					}
 				}
 				if ($keepPhoto) {
 					// Nextcloud's photo is newer than Google's, so it goes up instead of being replaced
@@ -471,7 +482,7 @@ class ContactSyncService {
 					return;
 				}
 				// An adopted card keeps whatever photo it had, so the first push does not replace Google's
-				$this->saveState($st, $col, (string)$p['gid'], $g, $uri, $etag, $photo, $action === SyncReport::ADOPT && $photo !== null ? null : $card);
+				$this->saveState($st, $col, (string)$p['gid'], $g, $uri, $etag, $photoFailed ? $oldPhoto : $photo, $action === SyncReport::ADOPT && $photo !== null ? null : $card, $photoFailed);
 				return;
 
 			case SyncReport::PULL_DELETE:
@@ -591,7 +602,9 @@ class ContactSyncService {
 	private function photoUpNeeded(ObjectState $st, VCard $card, array $person): bool {
 		$hash = $this->photoHash($card);
 		if ($this->forcePhotos && $hash !== null && (json_decode((string)$st->getExtra(), true)['forced'] ?? null) !== $hash) {
-			return true;
+			// The card still holds the thumbnail we downloaded. Uploading it would
+			// replace the original that is still on Google.
+			return !$this->storedPhotoStale($st);
 		}
 		$old = json_decode((string)$st->getExtra(), true)['nc'] ?? false;
 		if ($old === false) {
@@ -627,12 +640,14 @@ class ContactSyncService {
 		return $out['person'] ?? null;
 	}
 
-	private function applyPhoto(VCard $card, string $url): void {
+	private function applyPhoto(VCard $card, string $url): bool {
 		try {
 			[$data, $type] = $this->google->download($url);
 			$this->converter->setPhoto($card, $data, $type);
+			return true;
 		} catch (\Throwable) {
-			// a missing photo is not worth failing the contact for
+			// Keep the previous photo URL so the next sync tries this download again.
+			return false;
 		}
 	}
 

@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [11.1.7] - 2026-10-23
+
+### Fixed
+
+- A contact photo saved from an old thumbnail URL is fetched again even when the card etag has not changed. A failed download keeps the previous URL and is retried. `--force-photos` does not upload that thumbnail over the original still on Google.
+
 ## [11.1.6] - 2026-10-23
 
 ### Fixed
