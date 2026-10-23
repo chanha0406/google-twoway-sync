@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [11.1.5] - 2026-10-23
+
+### Fixed
+
+- A calendar in the trash stays unlinked. Nextcloud reports that with `{http://nextcloud.com/ns}deleted-at`.
+
 ## [1.1.4] - 2026-10-22
 
 ### Added

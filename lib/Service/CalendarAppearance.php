@@ -97,6 +97,6 @@ class CalendarAppearance {
 	 * @param array<string, mixed> $calendar
 	 */
 	public static function isInTrash(array $calendar): bool {
-		return ($calendar['{http://owncloud.org/ns}deleted-at'] ?? null) !== null;
+		return CalendarTrash::isInTrash($calendar);
 	}
 }
