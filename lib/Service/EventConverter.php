@@ -752,8 +752,9 @@ class EventConverter {
 	 * @param array{master: array<string, mixed>, overrides: array<string, array<string, mixed>>} $google
 	 * @param array<string, mixed> $googleMaster
 	 * @param array<string, array<string, mixed>> $googleOverrides
+	 * @param list<string> $keepLocalOverrides occurrence keys that stay even when only the local calendar has them
 	 */
-	public function mergeIntoCalendar(VCalendar $vcal, array $google, array $googleMaster, array $googleOverrides, string $defaultTz): bool {
+	public function mergeIntoCalendar(VCalendar $vcal, array $google, array $googleMaster, array $googleOverrides, string $defaultTz, array $keepLocalOverrides = []): bool {
 		$local = $this->groupFromCalendar($vcal, $defaultTz);
 		[$master, $overrideEvents] = $this->localEvents($vcal, $defaultTz);
 		if ($local === null || $master === null) {
@@ -778,7 +779,12 @@ class EventConverter {
 			$this->applyToVEvent($o, $google['overrides'][$key], self::OVERRIDE_FIELDS, $defaultTz);
 			$this->applyMeta($o, $googleOverrides[$key] ?? $googleMaster);
 		}
+		$keep = array_fill_keys($keepLocalOverrides, true);
 		foreach ($diff['onlyLocal'] as $key) {
+			// A failed upload leaves this occurrence only on Nextcloud.
+			if (isset($keep[$key])) {
+				continue;
+			}
 			$vcal->remove($overrideEvents[$key]);
 		}
 		return true;

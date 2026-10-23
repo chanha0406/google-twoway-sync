@@ -42,4 +42,38 @@ class SyncDecisionTest extends TestCase {
 		$this->assertSame('Restored because the calendar is read-only', SyncDecision::decide(false, false, false, false, 0, 0, false, false)['note']);
 		$this->assertSame('', SyncDecision::decide(true, false, true, false, 0, 0)['note']);
 	}
+
+	public function testPendingOverridesWinOverNewerGoogle(): void {
+		$local = SyncDecision::pendingLocal(false, 10, 50, ['D:20261002'], true);
+		$this->assertTrue($local['localChanged']);
+		$this->assertGreaterThan(50, $local['localModified']);
+		$decision = SyncDecision::decide(true, false, true, $local['localChanged'], 50, $local['localModified'], true, true);
+		$this->assertSame(SyncReport::PUSH_UPDATE, $decision['action']);
+	}
+
+	public function testPendingOverridesStayPullWhenReadOnly(): void {
+		$local = SyncDecision::pendingLocal(false, 10, 50, ['D:20261002'], false);
+		$this->assertFalse($local['localChanged']);
+		$this->assertSame(10, $local['localModified']);
+		$decision = SyncDecision::decide(true, false, true, $local['localChanged'], 50, $local['localModified'], false, false);
+		$this->assertSame(SyncReport::PULL_UPDATE, $decision['action']);
+	}
+
+	public function testNoPendingLeavesTheLocalChange(): void {
+		$local = SyncDecision::pendingLocal(false, 10, 50, [], true);
+		$this->assertSame(['localChanged' => false, 'localModified' => 10], $local);
+	}
+
+	public function testFailedOverridesStayPendingAndACleanPushClearsThem(): void {
+		$pending = SyncDecision::overridePushState(['D:20261002', 'D:20261003']);
+		$this->assertTrue($pending['keepEtag']);
+		$this->assertSame('{"pendingOverrides":["D:20261002","D:20261003"]}', $pending['extra']);
+		$this->assertSame(['D:20261002', 'D:20261003'], SyncDecision::pendingOverrideKeys($pending['extra']));
+
+		$clean = SyncDecision::overridePushState([]);
+		$this->assertFalse($clean['keepEtag']);
+		$this->assertNull($clean['extra']);
+		$this->assertSame([], SyncDecision::pendingOverrideKeys('{"photo":"x","retry":true}'));
+		$this->assertSame(['D:20261002'], SyncDecision::pendingOverrideKeys('{"pendingOverrides":["D:20261002",1,""]}'));
+	}
 }

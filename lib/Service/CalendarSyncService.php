@@ -22,7 +22,9 @@ use Sabre\VObject\Reader;
  * One object on each side is a master event with its exceptions. Changes are
  * found from the Google sync token and from the Nextcloud etags stored at the
  * end of the previous run. When both sides changed, the later edit wins; when
- * one side deleted and the other edited, the edit is kept.
+ * one side deleted and the other edited, the edit is kept. Exception occurrences
+ * that failed to upload stay pending, so a newer Google master does not win and
+ * the next pull does not delete them.
  */
 class CalendarSyncService {
 	public const LEGACY_JOB = 'OCA\Google\BackgroundJob\ImportCalendarJob';
@@ -227,17 +229,30 @@ class CalendarSyncService {
 	 * @return array<string, mixed>
 	 */
 	private function decide(ObjectState $st, array $g, ?array $obj, bool $googleChanged, bool $writable): array {
+		$pending = $this->pendingOverrideKeys($st);
+		$itemWritable = $writable && !($g['readonly'] ?? false);
+		$local = SyncDecision::pendingLocal(
+			$obj !== null && $obj['etag'] !== $st->getNcEtag(),
+			(int)($obj['lastmodified'] ?? 0),
+			(int)$g['updated'],
+			$pending,
+			$itemWritable,
+		);
 		$d = SyncDecision::decide(
 			$obj !== null,
 			$g['deleted'],
 			$googleChanged,
-			$obj !== null && $obj['etag'] !== $st->getNcEtag(),
+			$local['localChanged'],
 			(int)$g['updated'],
-			(int)($obj['lastmodified'] ?? 0),
+			$local['localModified'],
 			$writable,
-			$writable && !($g['readonly'] ?? false),
+			$itemWritable,
 		);
-		return ['action' => $d['action'], 'uri' => $st->getNcUri(), 'gid' => $st->getGoogleId(), 'group' => $g, 'state' => $st, 'note' => $d['note'] !== '' ? T::t($d['note']) : ''];
+		$note = $d['note'];
+		if ($pending !== [] && $itemWritable && ($d['action'] === SyncReport::PUSH_UPDATE || $d['action'] === SyncReport::PUSH_CREATE)) {
+			$note = 'Exception occurrences that failed to upload are sent again';
+		}
+		return ['action' => $d['action'], 'uri' => $st->getNcUri(), 'gid' => $st->getGoogleId(), 'group' => $g, 'state' => $st, 'note' => $note !== '' ? T::t($note) : ''];
 	}
 
 	/**
@@ -294,7 +309,7 @@ class CalendarSyncService {
 				if ($ctx->preview) {
 					return;
 				}
-				if (!$same && $this->converter->mergeIntoCalendar($vcal, $google, $g['master'], $overridesRaw, $tz)) {
+				if (!$same && $this->converter->mergeIntoCalendar($vcal, $google, $g['master'], $overridesRaw, $tz, $this->pendingOverrideKeys($st))) {
 					$etag = (string)$this->caldav->updateCalendarObject($ncId, $uri, $vcal->serialize());
 				}
 				$this->saveState($st, $col, (string)$p['gid'], $g, $uri, $etag);
@@ -337,7 +352,7 @@ class CalendarSyncService {
 				if (EventConverter::isSame($diff)) {
 					$report->unchanged++;
 					if (!$ctx->preview) {
-						$this->saveState($st, $col, (string)$p['gid'], $g, $uri, (string)$local[$uri]['etag']);
+						$this->saveState($st, $col, (string)$p['gid'], $g, $uri, (string)$local[$uri]['etag'], []);
 					}
 					return;
 				}
@@ -354,9 +369,7 @@ class CalendarSyncService {
 					$body = $this->converter->toGoogle($localGroup['master'], $diff['master'], $tz, true);
 					$this->google->request($ctx, 'PATCH', GoogleClient::CALENDAR . $calPath . '/' . rawurlencode($gid), ['sendUpdates' => 'none'], $body);
 				}
-				$this->pushOverrides($ctx, $calPath, $gid, $localGroup, $diff['changed'] + array_fill_keys($diff['onlyLocal'], EventConverter::OVERRIDE_FIELDS), $tz, $report);
-				$fresh = $this->fetchGroup($ctx, $col->getGoogleId(), $gid, (string)$g['uid']);
-				$this->saveState($st, $col, $gid, $fresh, $uri, (string)$local[$uri]['etag']);
+				$this->finishPush($ctx, $col, $st, $gid, $g, $uri, (string)$local[$uri]['etag'], $localGroup, $diff['changed'] + array_fill_keys($diff['onlyLocal'], EventConverter::OVERRIDE_FIELDS), $calPath, $tz, $report);
 				return;
 
 			case SyncReport::PUSH_CREATE:
@@ -376,18 +389,55 @@ class CalendarSyncService {
 				$body['iCalUID'] = $uid;
 				$created = $this->google->request($ctx, 'POST', GoogleClient::CALENDAR . $calPath . '/import', [], $body);
 				$gid = (string)$created['id'];
-				$this->pushOverrides($ctx, $calPath, $gid, $localGroup, array_fill_keys(array_keys($localGroup['overrides']), EventConverter::OVERRIDE_FIELDS), $tz, $report);
-				$fresh = $this->fetchGroup($ctx, $col->getGoogleId(), $gid, (string)($created['iCalUID'] ?? $uid));
-				$this->saveState($st, $col, $gid, $fresh, $uri, (string)$local[$uri]['etag']);
+				$createdUid = (string)($created['iCalUID'] ?? $uid);
+				$this->finishPush($ctx, $col, $st, $gid, [
+					'uid' => $createdUid,
+					'fp' => '',
+					'updated' => isset($created['updated']) ? (int)strtotime((string)$created['updated']) : 0,
+				], $uri, (string)$local[$uri]['etag'], $localGroup, array_fill_keys(array_keys($localGroup['overrides']), EventConverter::OVERRIDE_FIELDS), $calPath, $tz, $report);
 				return;
 		}
 	}
 
 	/**
+	 * Uploads exception occurrences and stores the result. Failed keys stay
+	 * pending and the Nextcloud etag is not moved, so the next run uploads them
+	 * again. Stopping the sync token is not enough: the master already on Google
+	 * would win the next conflict and the pull would delete the local occurrences.
+	 *
+	 * @param array<string, mixed> $fallback group stored when a fresh read does not finish
 	 * @param array{master: array<string, mixed>, overrides: array<string, array<string, mixed>>} $localGroup
 	 * @param array<string, list<string>> $fieldsByKey
 	 */
-	private function pushOverrides(SyncContext $ctx, string $calPath, string $gid, array $localGroup, array $fieldsByKey, string $tz, SyncReport $report): void {
+	private function finishPush(SyncContext $ctx, Collection $col, ?ObjectState $st, string $gid, array $fallback, string $uri, string $etag, array $localGroup, array $fieldsByKey, string $calPath, string $tz, SyncReport $report): void {
+		$failed = [];
+		try {
+			$failed = $this->pushOverrides($ctx, $calPath, $gid, $localGroup, $fieldsByKey, $tz, $report, $failed);
+		} catch (GoogleApiException $e) {
+			if ($e->isRateLimit() && $failed !== []) {
+				$this->saveState($st, $col, $gid, $fallback, $uri, $etag, $failed);
+			}
+			throw $e;
+		}
+		try {
+			$fresh = $this->fetchGroup($ctx, $col->getGoogleId(), $gid, (string)$fallback['uid']);
+		} catch (GoogleApiException $e) {
+			if ($failed !== []) {
+				$this->saveState($st, $col, $gid, $fallback, $uri, $etag, $failed);
+			}
+			throw $e;
+		}
+		$this->saveState($st, $col, $gid, $fresh, $uri, $etag, $failed);
+	}
+
+	/**
+	 * @param array{master: array<string, mixed>, overrides: array<string, array<string, mixed>>} $localGroup
+	 * @param array<string, list<string>> $fieldsByKey
+	 * @param list<string> $failed keys that were not uploaded; still filled when a rate limit is thrown
+	 * @return list<string>
+	 */
+	private function pushOverrides(SyncContext $ctx, string $calPath, string $gid, array $localGroup, array $fieldsByKey, string $tz, SyncReport $report, array &$failed): array {
+		$failed = [];
 		foreach ($fieldsByKey as $key => $fields) {
 			$body = $this->converter->toGoogle($localGroup['overrides'][$key], $fields, $tz, true);
 			if ($body === []) {
@@ -396,12 +446,18 @@ class CalendarSyncService {
 			try {
 				$this->google->request($ctx, 'PATCH', GoogleClient::CALENDAR . $calPath . '/' . rawurlencode(EventConverter::instanceId($gid, (string)$key)), ['sendUpdates' => 'none'], $body);
 			} catch (GoogleApiException $e) {
-				if (!$e->isNotFound()) {
+				$failed[] = (string)$key;
+				if ($e->isRateLimit()) {
 					throw $e;
 				}
-				$report->error(T::t('Could not find occurrence %s of a repeating event on Google, so it was not uploaded', [$key]));
+				if ($e->isNotFound()) {
+					$report->error(T::t('Could not find occurrence %s of a repeating event on Google, so it was not uploaded', [$key]));
+				} else {
+					$report->error(T::t('Could not upload occurrence %1$s of a repeating event: %2$s', [$key, $e->getMessage()]));
+				}
 			}
 		}
+		return $failed;
 	}
 
 	/**
@@ -645,23 +701,41 @@ class CalendarSyncService {
 
 	/**
 	 * @param array<string, mixed> $g
+	 * @param list<string>|null $pendingOverrides null leaves extra alone; a list is the push result
 	 */
-	private function saveState(?ObjectState $st, Collection $col, string $gid, array $g, string $uri, string $etag): void {
+	private function saveState(?ObjectState $st, Collection $col, string $gid, array $g, string $uri, string $etag, ?array $pendingOverrides = null): void {
 		$st ??= new ObjectState();
+		$pushed = $pendingOverrides === null ? null : SyncDecision::overridePushState($pendingOverrides);
 		$st->setCollectionId($col->getId());
 		$st->setGoogleId($gid);
 		$st->setGoogleUid((string)$g['uid']);
 		$st->setGoogleFp((string)$g['fp']);
 		$st->setGoogleUpdated((int)$g['updated']);
 		$st->setNcUri($uri);
-		$st->setNcEtag($etag);
+		if ($pushed === null || !$pushed['keepEtag']) {
+			$st->setNcEtag($etag);
+		} elseif ($st->getId() === null) {
+			// No etag was stored yet. An empty one cannot match the local object,
+			// so the next run still sees it as changed.
+			$st->setNcEtag('');
+		}
 		$st->setIgnored(0);
 		$st->setLastSync(time());
+		if ($pushed !== null) {
+			$st->setExtra($pushed['extra']);
+		}
 		if ($st->getId() === null) {
 			$this->states->insert($st);
 		} else {
 			$this->states->update($st);
 		}
+	}
+
+	/**
+	 * @return list<string>
+	 */
+	private function pendingOverrideKeys(?ObjectState $st): array {
+		return SyncDecision::pendingOverrideKeys($st === null ? null : $st->getExtra());
 	}
 
 	/**

@@ -102,6 +102,8 @@ OC.L10N.register(
 	"Nextcloud content updated: %s": "NC 내용 갱신: %s",
 	"(%s exception occurrences exist only on Google and were left unchanged)": "구글에만 있는 예외 회차 %s건은 그대로 두었습니다",
 	"Could not find occurrence %s of a repeating event on Google, so it was not uploaded": "반복 일정의 %s 회차를 구글에서 찾지 못해 올리지 않았습니다",
+	"Could not upload occurrence %1$s of a repeating event: %2$s": "반복 일정의 %1$s 회차를 올리지 못했습니다: %2$s",
+	"Exception occurrences that failed to upload are sent again": "올리지 못한 예외 회차를 다시 보냅니다",
 	"New calendar": "새 캘린더",
 	"Enabled: %s": "켬: %s",
 	"Unknown item: %s": "없는 항목: %s",

@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [11.1.8] - 2026-10-23
+
+### Fixed
+
+- Exception occurrences of a repeating event that failed to upload are no longer treated as synced. The next pull keeps them and they are uploaded again, even when the Google master is newer.
+
 ## [11.1.7] - 2026-10-23
 
 ### Fixed
